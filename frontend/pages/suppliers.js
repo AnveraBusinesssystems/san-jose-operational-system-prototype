@@ -1,4 +1,4 @@
-import { createSupplier, listSuppliers } from "../js/api.js";
+import { createSupplier, listSuppliers } from "../js/api.js?v=phonefix1";
 import { can } from "../js/permissions.js";
 import { formToObject, notice, status, table } from "../js/utils.js";
 
