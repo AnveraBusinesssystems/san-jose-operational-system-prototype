@@ -1,20 +1,35 @@
 let cameraScanner;
+let libraryLoadPromise;
+
+const SCANNER_LIBRARY_URLS = [
+  "https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js",
+  "https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"
+];
 
 export function handleKeyboardScan(inputElement, onScanCallback) {
+  let lastValue = "";
+  const emitScan = () => {
+    const value = inputElement.value.trim();
+    if (!value || value === lastValue) return;
+    lastValue = value;
+    onScanCallback(value);
+  };
+
   inputElement.addEventListener("keydown", (event) => {
     if (event.key !== "Enter") return;
     event.preventDefault();
-    const value = inputElement.value.trim();
-    if (value) onScanCallback(value);
+    emitScan();
   });
+  inputElement.addEventListener("change", emitScan);
+  inputElement.addEventListener("blur", emitScan);
+
+  return emitScan;
 }
 
 export async function startCameraScanner(targetInputId, onScanCallback) {
   const target = document.getElementById(targetInputId);
   if (!target) throw new Error("Target scan input was not found.");
-  if (!window.Html5Qrcode) {
-    throw new Error("Camera scanner library is not loaded. Check internet access and reload.");
-  }
+  await ensureScannerLibrary();
   await stopCameraScanner();
   const readerId = "cameraReader";
   cameraScanner = new window.Html5Qrcode(readerId);
@@ -36,4 +51,42 @@ export async function stopCameraScanner() {
   } finally {
     cameraScanner = null;
   }
+}
+
+async function ensureScannerLibrary() {
+  if (window.Html5Qrcode) return;
+  if (!libraryLoadPromise) {
+    libraryLoadPromise = loadScannerLibrary();
+  }
+  await libraryLoadPromise;
+}
+
+async function loadScannerLibrary() {
+  for (const url of SCANNER_LIBRARY_URLS) {
+    try {
+      await loadScript(url);
+      if (window.Html5Qrcode) return;
+    } catch (_error) {
+      // Try the next CDN.
+    }
+  }
+  throw new Error("Camera scanner library could not load. Check phone internet access and reload.");
+}
+
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    const existing = document.querySelector(`script[src="${src}"]`);
+    if (existing) {
+      existing.addEventListener("load", resolve, { once: true });
+      existing.addEventListener("error", reject, { once: true });
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.src = src;
+    script.async = true;
+    script.onload = resolve;
+    script.onerror = reject;
+    document.head.appendChild(script);
+  });
 }
