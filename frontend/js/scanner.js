@@ -2,8 +2,8 @@ let cameraScanner;
 let libraryLoadPromise;
 
 const SCANNER_LIBRARY_URLS = [
-  "https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js",
-  "https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"
+  "https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js",
+  "https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"
 ];
 
 export function handleKeyboardScan(inputElement, onScanCallback) {
@@ -83,10 +83,21 @@ function loadScript(src) {
     }
 
     const script = document.createElement("script");
+    const timeout = window.setTimeout(() => {
+      script.remove();
+      reject(new Error("Scanner library load timed out."));
+    }, 7000);
     script.src = src;
     script.async = true;
-    script.onload = resolve;
-    script.onerror = reject;
+    script.onload = () => {
+      window.clearTimeout(timeout);
+      resolve();
+    };
+    script.onerror = () => {
+      window.clearTimeout(timeout);
+      script.remove();
+      reject(new Error("Scanner library failed to load."));
+    };
     document.head.appendChild(script);
   });
 }
