@@ -57,7 +57,20 @@ async function renderAppRoute(page) {
     return;
   }
   renderNavigation(user);
-  await routes[safePage].render(context());
+  try {
+    await routes[safePage].render(context());
+  } catch (error) {
+    const label = allowed.find((item) => item.id === safePage)?.label || "Page";
+    title.textContent = label;
+    subtitle.textContent = "Connection issue";
+    view.innerHTML = `
+      <section class="panel">
+        <div class="panel-header"><h2>Could not load this screen</h2></div>
+        <p class="muted">${error.message}</p>
+        <p class="muted">If you just updated Apps Script, deploy a new Web App version and refresh this page.</p>
+      </section>
+    `;
+  }
   renderNavigation(user);
 }
 
