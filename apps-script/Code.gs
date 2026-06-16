@@ -58,6 +58,7 @@ function handleApiRequest_(action, payloadText, callback) {
       listLocations,
       listPurchaseOrders,
       getPurchaseOrderDetail,
+      generatePurchaseOrderTemplate,
       createPurchaseOrder,
       purchaseOrderAction,
       receiveProduct,
@@ -106,6 +107,7 @@ function createProduct(payload) {
 
   const products = readTable_("PRODUCTS");
   const productId = input.product_id || nextId_("PRODUCTS", "product_id", "PROD");
+  const stock = calculateStockLevels_(input);
   if (products.some((row) => row.product_id === productId)) {
     throw new Error("Product ID already exists.");
   }
@@ -119,8 +121,8 @@ function createProduct(payload) {
     amazon_sku: input.amazon_sku || "",
     wholesale_sku: input.wholesale_sku || "",
     barcode_or_qr_value: input.barcode_or_qr_value || productId,
-    min_stock_qty: Number(input.min_stock_qty || 0),
-    target_stock_qty: Number(input.target_stock_qty || 0),
+    min_stock_qty: stock.min_stock_qty,
+    target_stock_qty: stock.target_stock_qty,
     velocity_class: input.velocity_class || "",
     storage_zone_preference: input.storage_zone_preference || "",
     is_active: true,
@@ -134,7 +136,10 @@ function createProduct(payload) {
 }
 
 function listSuppliers() {
-  return readTable_("SUPPLIERS");
+  return readTable_("SUPPLIERS").map((supplier) => ({
+    ...supplier,
+    lead_time_expected_days: calculateSupplierLeadTime_(supplier.supplier_id)
+  }));
 }
 
 function listLocations() {
@@ -164,7 +169,7 @@ function createSupplier(payload) {
     address: input.address || "",
     payment_terms: input.payment_terms || "Net 30",
     default_currency: input.default_currency || "USD",
-    lead_time_expected_days: Number(input.lead_time_expected_days || 0),
+    lead_time_expected_days: calculateSupplierLeadTime_(supplierId),
     is_active: true,
     created_at: new Date(),
     updated_at: new Date(),
@@ -198,6 +203,18 @@ function getPurchaseOrderDetail(payload) {
     }));
 
   return { po, lines };
+}
+
+function generatePurchaseOrderTemplate(payload) {
+  const detail = getPurchaseOrderDetail(payload);
+  if (!detail) throw new Error("Purchase order not found.");
+  return {
+    po: detail.po,
+    lines: detail.lines.map((line) => ({
+      ...line,
+      qr_value: purchaseOrderQrValue_(line.product_id, line.qty_ordered, line.supplier_expected_lot_number)
+    }))
+  };
 }
 
 function createPurchaseOrder(payload) {
@@ -254,7 +271,7 @@ function createPurchaseOrder(payload) {
     unit_cost: unitCost,
     currency: "USD",
     line_total: qty * unitCost,
-    supplier_expected_lot_number: "",
+    supplier_expected_lot_number: input.supplier_expected_lot_number || "",
     notes: input.notes || ""
   };
 
@@ -404,6 +421,9 @@ function lookupScan(payload) {
   payload = payload || {};
   const value = String(payload.scanValue || "").trim();
   if (!value) return null;
+
+  const poQr = parsePurchaseOrderQr_(value);
+  if (poQr) return { type: "PURCHASE_ORDER_QR", record: poQr };
 
   const product = readTable_("PRODUCTS").find((row) =>
     [row.product_id, row.barcode_or_qr_value, row.amazon_sku, row.wholesale_sku].includes(value)
@@ -619,4 +639,51 @@ function updatePoStatus_(poId) {
       return;
     }
   }
+}
+
+function purchaseOrderQrValue_(productId, qty, supplierLotNumber) {
+  return [productId, "QTY:" + Number(qty || 0), "SUPLOT:" + (supplierLotNumber || "PENDING")].join("|");
+}
+
+function parsePurchaseOrderQr_(value) {
+  const parts = String(value || "").split("|").map((part) => part.trim());
+  if (parts.length < 2 || parts[1].indexOf("QTY:") !== 0) return null;
+  const qtyPart = parts.find((part) => part.indexOf("QTY:") === 0) || "";
+  const lotPart = parts.find((part) => part.indexOf("SUPLOT:") === 0) || "";
+  return {
+    product_id: parts[0],
+    qty: Number(qtyPart.replace("QTY:", "") || 0),
+    supplier_lot_number: lotPart.replace("SUPLOT:", "")
+  };
+}
+
+function calculateStockLevels_(input) {
+  const velocity = String(input.velocity_class || "").toUpperCase();
+  const category = String(input.product_category || "").toUpperCase();
+  const target = velocity === "FAST"
+    ? 100
+    : category.indexOf("PACK") >= 0
+      ? 50
+      : 25;
+  return {
+    min_stock_qty: Math.max(1, Math.ceil(target * 0.25)),
+    target_stock_qty: Math.max(5, target)
+  };
+}
+
+function calculateSupplierLeadTime_(supplierId) {
+  if (!supplierId) return 5;
+  const leadTimes = readTable_("PURCHASE_ORDERS")
+    .filter((po) => po.supplier_id === supplierId && po.order_date && po.actual_completed_date)
+    .map((po) => daysBetween_(po.order_date, po.actual_completed_date))
+    .filter((days) => isFinite(days) && days >= 0);
+  if (!leadTimes.length) return 5;
+  return Math.round(leadTimes.reduce((sum, days) => sum + days, 0) / leadTimes.length);
+}
+
+function daysBetween_(start, end) {
+  const startDate = new Date(start);
+  const endDate = new Date(end);
+  if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) return NaN;
+  return (endDate.getTime() - startDate.getTime()) / 86400000;
 }
