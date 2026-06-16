@@ -11,8 +11,7 @@ export async function render(ctx) {
         <div class="panel-header">
           <h2>Receiving Form</h2>
           <div class="actions">
-            <button id="startCamera" class="btn secondary" type="button">Start Camera</button>
-            <button id="stopCamera" class="btn secondary" type="button">Stop Camera</button>
+            <button id="scanReceiveQr" class="btn secondary" type="button">Scan</button>
           </div>
         </div>
         <form id="receiveForm" class="form-grid">
@@ -54,16 +53,16 @@ export async function render(ctx) {
     document.getElementById("receiveResult").textContent = `Captured location scan: ${value}`;
   });
 
-  document.getElementById("startCamera").addEventListener("click", async () => {
+  document.getElementById("scanReceiveQr").addEventListener("click", async () => {
     try {
       await startCameraScanner("receiveScan", (value) => {
         handleReceivingScan(value);
+        stopCameraScanner();
       });
     } catch (error) {
       notice(error.message);
     }
   });
-  document.getElementById("stopCamera").addEventListener("click", stopCameraScanner);
 
   document.getElementById("receiveForm").addEventListener("submit", async (event) => {
     event.preventDefault();
