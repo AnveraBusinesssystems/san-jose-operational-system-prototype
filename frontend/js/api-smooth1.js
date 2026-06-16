@@ -1,4 +1,4 @@
-import * as base from "./api.js?v=opsupdate1";
+import * as base from "./api.js?v=lotbase1";
 
 const READ_CACHE_TTL_MS = 45000;
 const readCache = new Map();
@@ -51,6 +51,10 @@ export async function purchaseOrderAction(user, poId, action) {
 
 export async function receiveProduct(user, input) {
   return mutate(() => base.receiveProduct(user, input));
+}
+
+export async function recordInventoryMovement(user, input) {
+  return mutate(() => base.recordInventoryMovement(user, input));
 }
 
 export async function lookupScan(scanValue) {
