@@ -1,4 +1,4 @@
-import { inventorySnapshot, lookupScan } from "../js/api.js?v=opsupdate1";
+import { inventorySnapshot, lookupScan } from "../js/api-smooth1.js";
 import { handleKeyboardScan, startCameraScanner, stopCameraScanner } from "../js/scanner.js?v=opsupdate1";
 import { escapeHtml, table } from "../js/utils.js";
 
