@@ -1,4 +1,4 @@
-import { listLocations, resetToSpreadsheetSeed } from "../js/api.js?v=phonefix1";
+import { listLocations, resetToSpreadsheetSeed } from "../js/api-smooth1.js";
 import { notice, table } from "../js/utils.js";
 
 export async function render(ctx) {
