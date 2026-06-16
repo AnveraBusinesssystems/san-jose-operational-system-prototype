@@ -1,4 +1,4 @@
-import { createSupplier, listSuppliers } from "../js/api.js?v=phonefix2";
+import { createSupplier, listSuppliers } from "../js/api.js?v=opsupdate1";
 import { can } from "../js/permissions.js";
 import { formToObject, notice, status, table } from "../js/utils.js";
 
@@ -27,7 +27,7 @@ export async function render(ctx) {
     event.preventDefault();
     try {
       const supplier = await createSupplier(ctx.user, formToObject(event.currentTarget));
-      notice(`Supplier saved: ${supplier.supplier_id}.`);
+      notice(`Supplier saved: ${supplier.supplier_id}. Lead time starts/calculates at ${supplier.lead_time_expected_days} days.`);
       await render(ctx);
     } catch (error) {
       notice(error.message);
@@ -46,8 +46,8 @@ function supplierForm() {
         <div class="field"><label>Email</label><input name="email" type="email"></div>
         <div class="field"><label>Phone</label><input name="phone"></div>
         <div class="field"><label>Payment Terms</label><input name="payment_terms" value="Net 30"></div>
-        <div class="field"><label>Lead Time Days</label><input name="lead_time_expected_days" type="number" min="0" value="0"></div>
         <div class="field"><label>Currency</label><input name="default_currency" value="USD"></div>
+        <div class="field full"><p class="muted">Lead time starts at 5 days and is recalculated from completed purchase order history over time.</p></div>
         <div class="field full"><label>Address</label><textarea name="address"></textarea></div>
         <div class="field full"><label>Notes</label><textarea name="notes"></textarea></div>
         <div class="field full"><button class="btn" type="submit">Save Supplier</button></div>
