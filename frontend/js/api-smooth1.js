@@ -1,4 +1,4 @@
-import * as base from "./api.js?v=lotbase1";
+import * as base from "./api.js?v=lotbase2";
 
 const READ_CACHE_TTL_MS = 45000;
 const readCache = new Map();
