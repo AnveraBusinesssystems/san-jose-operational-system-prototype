@@ -1,6 +1,6 @@
 import { requirePermission } from "./permissions.js";
 import { numberValue, today, uid } from "./utils.js";
-import { GOOGLE_SCRIPT_WEB_APP_URL } from "./config.js?v=phonefix2";
+import { GOOGLE_SCRIPT_WEB_APP_URL } from "./config.js?v=opsupdate1";
 
 const DB_KEY = "sjops.database.v1";
 let dbCache;
@@ -91,6 +91,7 @@ export async function createProduct(user, input) {
   if (useAppsScript()) return callAppsScript("createProduct", { user, input });
   requirePermission(user, "products:create");
   const data = await db();
+  const stock = calculateStockLevels(input, data);
   const product = {
     product_id: input.product_id || uid("PROD", data.products, "product_id"),
     product_name: input.product_name,
@@ -100,8 +101,8 @@ export async function createProduct(user, input) {
     amazon_sku: input.amazon_sku || "",
     wholesale_sku: input.wholesale_sku || "",
     barcode_or_qr_value: input.barcode_or_qr_value || input.product_id || "",
-    min_stock_qty: numberValue(input.min_stock_qty),
-    target_stock_qty: numberValue(input.target_stock_qty),
+    min_stock_qty: stock.min_stock_qty,
+    target_stock_qty: stock.target_stock_qty,
     velocity_class: input.velocity_class || "",
     storage_zone_preference: input.storage_zone_preference || "",
     is_active: true,
@@ -119,15 +120,20 @@ export async function createProduct(user, input) {
 
 export async function listSuppliers() {
   if (useAppsScript()) return callAppsScript("listSuppliers");
-  return (await db()).suppliers;
+  const data = await db();
+  return data.suppliers.map((supplier) => ({
+    ...supplier,
+    lead_time_expected_days: calculateSupplierLeadTime(supplier.supplier_id, data)
+  }));
 }
 
 export async function createSupplier(user, input) {
   if (useAppsScript()) return callAppsScript("createSupplier", { user, input });
   requirePermission(user, "suppliers:create");
   const data = await db();
+  const supplierId = input.supplier_id || uid("SUP", data.suppliers, "supplier_id");
   const supplier = {
-    supplier_id: input.supplier_id || uid("SUP", data.suppliers, "supplier_id"),
+    supplier_id: supplierId,
     supplier_name: input.supplier_name,
     contact_name: input.contact_name || "",
     email: input.email || "",
@@ -135,7 +141,7 @@ export async function createSupplier(user, input) {
     address: input.address || "",
     payment_terms: input.payment_terms || "Net 30",
     default_currency: input.default_currency || "USD",
-    lead_time_expected_days: numberValue(input.lead_time_expected_days),
+    lead_time_expected_days: calculateSupplierLeadTime(supplierId, data),
     is_active: true,
     notes: input.notes || ""
   };
@@ -176,6 +182,13 @@ export async function getPurchaseOrderDetail(poId) {
   return { po, lines };
 }
 
+export async function generatePurchaseOrderTemplate(poId) {
+  if (useAppsScript()) return callAppsScript("generatePurchaseOrderTemplate", { poId });
+  const detail = await getPurchaseOrderDetail(poId);
+  if (!detail) throw new Error("Purchase order not found.");
+  return buildPurchaseOrderTemplate(detail);
+}
+
 export async function createPurchaseOrder(user, input) {
   if (useAppsScript()) return callAppsScript("createPurchaseOrder", { user, input });
   requirePermission(user, "purchaseOrders:create");
@@ -209,7 +222,9 @@ export async function createPurchaseOrder(user, input) {
     qty_remaining: qty,
     unit_type: input.unit_type || "BOX",
     unit_cost: unitCost,
-    line_total: qty * unitCost
+    line_total: qty * unitCost,
+    supplier_expected_lot_number: input.supplier_expected_lot_number || "",
+    qr_value: purchaseOrderQrValue(input.product_id, qty, input.supplier_expected_lot_number)
   };
   data.purchaseOrders.push(po);
   data.purchaseOrderLines.push(line);
@@ -315,6 +330,58 @@ export async function receiveProduct(user, input) {
   data.inventoryMovements.push(movement);
   save();
   return { receiving, lot, movement };
+}
+
+export function purchaseOrderQrValue(productId, qty, supplierLotNumber = "") {
+  return [productId, `QTY:${numberValue(qty, 0)}`, `SUPLOT:${supplierLotNumber || "PENDING"}`].join("|");
+}
+
+function calculateStockLevels(input, data) {
+  const velocity = String(input.velocity_class || "").toUpperCase();
+  const category = String(input.product_category || "").toUpperCase();
+  const existingMovements = data.inventoryMovements
+    .filter((movement) => movement.product_id === input.product_id)
+    .map((movement) => Math.abs(numberValue(movement.qty_change)));
+  const averageMovement = existingMovements.length
+    ? existingMovements.reduce((sum, qty) => sum + qty, 0) / existingMovements.length
+    : 0;
+  const baseTarget = averageMovement > 0
+    ? Math.ceil(averageMovement * 4)
+    : velocity === "FAST"
+      ? 100
+      : category.includes("PACK")
+        ? 50
+        : 25;
+  return {
+    min_stock_qty: Math.max(1, Math.ceil(baseTarget * 0.25)),
+    target_stock_qty: Math.max(5, baseTarget)
+  };
+}
+
+function calculateSupplierLeadTime(supplierId, data) {
+  const completed = data.purchaseOrders
+    .filter((po) => po.supplier_id === supplierId && po.order_date && po.actual_completed_date)
+    .map((po) => daysBetween(po.order_date, po.actual_completed_date))
+    .filter((days) => Number.isFinite(days) && days >= 0);
+  if (!completed.length) return 5;
+  return Math.round(completed.reduce((sum, days) => sum + days, 0) / completed.length);
+}
+
+function daysBetween(start, end) {
+  const startDate = new Date(start);
+  const endDate = new Date(end);
+  if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) return NaN;
+  return (endDate - startDate) / 86400000;
+}
+
+function buildPurchaseOrderTemplate({ po, lines }) {
+  return {
+    po,
+    lines: lines.map((line) => ({
+      ...line,
+      qr_value: purchaseOrderQrValue(line.product_id, line.qty_ordered, line.supplier_expected_lot_number)
+    }))
+  };
 }
 
 function recommendLocation(data, product) {
