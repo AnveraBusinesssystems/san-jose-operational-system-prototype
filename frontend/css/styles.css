@@ -320,6 +320,22 @@ tr:last-child td {
 .status.warn { color: var(--warn); background: #fff4df; }
 .status.danger { color: var(--danger); background: #fde8e7; }
 
+.switch {
+  align-items: center;
+  display: inline-flex;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.switch input {
+  accent-color: var(--primary);
+  min-height: auto;
+  width: 18px;
+  height: 18px;
+}
+
 .scan-box {
   display: grid;
   gap: 12px;
