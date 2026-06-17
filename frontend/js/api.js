@@ -202,15 +202,18 @@ export async function createProduct(user, input) {
   requirePermission(user, "products:create");
   const data = await db();
   const stock = calculateStockLevels(input, data);
+  const weightPerPurchaseUnit = numberValue(input.case_weight_lbs);
   const product = {
     product_id: input.product_id || uid("PROD", data.products, "product_id"),
     product_name: input.product_name,
     product_category: input.product_category || "",
     default_unit: input.default_unit || "BOX",
-    base_unit: input.base_unit || input.default_unit || "BOX",
-    units_per_purchase_unit: numberValue(input.units_per_purchase_unit, input.case_weight_lbs || 1),
-    can_break_case: input.can_break_case || "FALSE",
-    case_weight_lbs: numberValue(input.case_weight_lbs),
+    base_unit: "LB",
+    amount_per_purchase_unit: numberValue(input.amount_per_purchase_unit, 1),
+    units_per_purchase_unit: weightPerPurchaseUnit || numberValue(input.units_per_purchase_unit, 1),
+    can_break_case: "TRUE",
+    case_weight_lbs: weightPerPurchaseUnit,
+    perishability_days: numberValue(input.perishability_days),
     amazon_sku: input.amazon_sku || "",
     wholesale_sku: input.wholesale_sku || "",
     barcode_or_qr_value: input.barcode_or_qr_value || input.product_id || "",
@@ -227,6 +230,18 @@ export async function createProduct(user, input) {
   }
   if (!product.barcode_or_qr_value) product.barcode_or_qr_value = product.product_id;
   data.products.push(product);
+  save();
+  return product;
+}
+
+export async function updateProductStatus(user, productId, isActive) {
+  if (useAppsScript()) return callAppsScript("updateProductStatus", { user, productId, isActive });
+  requirePermission(user, "products:edit");
+  const data = await db();
+  const product = data.products.find((item) => item.product_id === productId);
+  if (!product) throw new Error("Product not found.");
+  product.is_active = Boolean(isActive);
+  product.updated_at = new Date().toISOString();
   save();
   return product;
 }
