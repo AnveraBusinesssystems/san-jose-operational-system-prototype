@@ -395,7 +395,7 @@ function printablePurchaseOrderHtml(detail) {
 
 function qrLabelSheetHtml(detail) {
   if (!detail) throw new Error("Purchase order was not found.");
-  const labels = buildPackageLabels(detail);
+  const labels = buildProductLabels(detail);
   const configs = labels.map((label) => ({
     text: label.qrValue,
     filename: label.filename,
@@ -428,7 +428,7 @@ function qrLabelSheetHtml(detail) {
           .label-details { display: grid; gap: 5px; grid-template-columns: 1fr 1fr; }
           .label-details span { color: #607064; display: block; font-size: 11px; font-weight: 700; }
           .label-details strong { display: block; font-size: 14px; margin-top: 2px; }
-          .package-number { border-top: 1px solid #d8e1da; font-size: 16px; font-weight: 700; margin-top: 8px; padding-top: 8px; text-align: center; }
+          .label-quantity { border-top: 1px solid #d8e1da; font-size: 18px; font-weight: 700; margin-top: 8px; padding-top: 8px; text-align: center; }
           @page { size: 4in 6in; margin: 0.2in; }
           @media print {
             body { background: white; padding: 0; }
@@ -453,7 +453,7 @@ function qrLabelSheetHtml(detail) {
                 <strong>${escapeHtml(label.productName)}</strong>
                 <span>${escapeHtml(label.productId)}</span>
               </div>
-              <img class="qr" alt="QR label ${label.packageNumber} for ${escapeHtml(label.productName)}" src="${qrImageUrl(label.qrValue, 600)}">
+              <img class="qr" alt="QR label for ${escapeHtml(label.productName)}" src="${qrImageUrl(label.qrValue, 600)}">
               <div>
                 <div class="label-details">
                   <div><span>Purchase Order</span><strong>${escapeHtml(label.poId)}</strong></div>
@@ -461,7 +461,7 @@ function qrLabelSheetHtml(detail) {
                   <div><span>Pack</span><strong>${escapeHtml(label.unitType)} x ${escapeHtml(formatNumber(label.unitWeight))} LB</strong></div>
                   <div><span>Supplier Lot</span><strong>${escapeHtml(label.supplierLot || "PENDING")}</strong></div>
                 </div>
-                <div class="package-number">Package ${label.packageNumber} of ${label.packageCount}</div>
+                <div class="label-quantity">Quantity: ${escapeHtml(formatNumber(label.quantity))} ${escapeHtml(pluralizeUnit(label.unitType, label.quantity))}</div>
               </div>
             </article>
           `).join("")}
@@ -474,7 +474,7 @@ function qrLabelSheetHtml(detail) {
             button.textContent = "Preparing ZIP...";
             try {
               const qrCodes = JSON.parse(document.getElementById("qr-configs").textContent);
-              if (qrCodes.length > 1000) throw new Error("A ZIP can contain up to 1,000 QR labels.");
+              if (qrCodes.length > 1000) throw new Error("A ZIP can contain up to 1,000 product QR codes.");
               const response = await fetch("https://quickchart.io/qr/batch", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -502,33 +502,26 @@ function qrLabelSheetHtml(detail) {
   `;
 }
 
-function buildPackageLabels({ po, lines }) {
-  return lines.flatMap((line) => {
-    const packageCount = Math.max(1, Math.round(Number(line.qty_ordered || 1)));
-    const baseQr = JSON.parse(qrValueForLine(po, line));
-    return Array.from({ length: packageCount }, (_value, index) => {
-      const packageNumber = index + 1;
-      const qrValue = JSON.stringify({
-        ...baseQr,
-        qty: 1,
-        package_number: packageNumber,
-        package_count: packageCount
-      });
-      return {
-        poId: po.po_id,
-        poLineId: line.po_line_id,
-        productId: line.product_id,
-        productName: line.product?.product_name || line.product_id,
-        unitType: line.unit_type,
-        unitWeight: line.case_weight_lbs || line.units_per_purchase_unit,
-        supplierLot: line.supplier_expected_lot_number || "",
-        packageNumber,
-        packageCount,
-        qrValue,
-        filename: `${safeFilename(po.po_id)}-${safeFilename(line.product_id)}-${String(packageNumber).padStart(4, "0")}-of-${String(packageCount).padStart(4, "0")}`
-      };
-    });
-  });
+function buildProductLabels({ po, lines }) {
+  return lines.map((line) => ({
+    poId: po.po_id,
+    poLineId: line.po_line_id,
+    productId: line.product_id,
+    productName: line.product?.product_name || line.product_id,
+    quantity: Number(line.qty_ordered || 0),
+    unitType: line.unit_type,
+    unitWeight: line.case_weight_lbs || line.units_per_purchase_unit,
+    supplierLot: line.supplier_expected_lot_number || "",
+    qrValue: qrValueForLine(po, line),
+    filename: `${safeFilename(po.po_id)}-${safeFilename(line.product_id)}-${safeFilename(line.po_line_id)}`
+  }));
+}
+
+function pluralizeUnit(unitType, quantity) {
+  const unit = String(unitType || "UNIT").toUpperCase();
+  if (Number(quantity) === 1 || unit === "LB") return unit;
+  const irregular = { BOX: "BOXES", CASE: "CASES" };
+  return irregular[unit] || `${unit}S`;
 }
 
 function buildProductLookup(products) {
