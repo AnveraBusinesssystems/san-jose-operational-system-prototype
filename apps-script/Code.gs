@@ -414,28 +414,37 @@ function receiveProduct(payload) {
     const lines = readTable_("PURCHASE_ORDER_LINES");
     const line = lines.find((row) => row.po_line_id === input.po_line_id);
     if (!line) throw new Error("Purchase order line not found.");
+    if (line.po_id !== input.po_id) throw new Error("The selected product does not belong to this purchase order.");
 
     const qtyReceived = Number(input.qty_received || 0);
     const qtyDamaged = Number(input.qty_damaged || 0);
     if (qtyReceived <= 0) throw new Error("Quantity received must be greater than zero.");
+    if (qtyDamaged < 0 || qtyDamaged > qtyReceived) throw new Error("Damaged quantity cannot exceed quantity received.");
+    const qualityStatus = String(input.quality_status || "PASS").toUpperCase();
+    if (!["PASS", "HOLD", "REJECTED"].includes(qualityStatus)) throw new Error("Select a valid quality status.");
+    if (qualityStatus === "REJECTED" && qtyDamaged !== qtyReceived) {
+      throw new Error("A rejected delivery must have the full received quantity marked as damaged/rejected.");
+    }
 
     const product = readTable_("PRODUCTS").find((row) => row.product_id === line.product_id);
     const unitsPerPurchaseUnit = Number(line.units_per_purchase_unit || (product && (product.units_per_purchase_unit || product.case_weight_lbs)) || 1) || 1;
     const baseUnit = line.base_unit || (product && product.base_unit) || line.unit_type;
-    const recommendedLocation = recommendLocation_(product);
-    const confirmedLocationId = input.confirmed_location_id || recommendedLocation.location_id;
-    if (!readTable_("LOCATIONS").some((row) => row.location_id === confirmedLocationId || row.qr_value === confirmedLocationId)) {
-      throw new Error("Confirmed location was not found.");
-    }
+    const locations = readTable_("LOCATIONS");
+    const confirmedLocation = locations.find((row) => [row.location_id, row.qr_value].includes(input.confirmed_location_id));
+    if (!confirmedLocation) throw new Error("Select or scan a valid warehouse location.");
+    const confirmedLocationId = confirmedLocation.location_id;
 
     const internalLotId = input.internal_lot_id || nextId_("LOTS", "internal_lot_id", "LOT");
     const receivingId = nextId_("RECEIVING", "receiving_id", "RCV");
     const movementId = nextId_("INVENTORY_MOVEMENTS", "movement_id", "MOV");
     const acceptedQty = qtyReceived - qtyDamaged;
+    const remainingBefore = Number(line.qty_remaining || Math.max(0, Number(line.qty_ordered || 0) - Number(line.qty_received_total || 0)));
+    const quantityStatus = acceptedQty > remainingBefore ? "OVER" : acceptedQty < remainingBefore ? "PARTIAL" : "MATCH";
+    const approvalStatus = qualityStatus === "PASS" ? "APPROVED" : qualityStatus;
     const acceptedBaseQty = Number(input.actual_base_qty || 0) > 0
       ? Number(input.actual_base_qty)
       : acceptedQty * unitsPerPurchaseUnit;
-    ensureTableColumns_("RECEIVING", ["base_unit", "units_per_purchase_unit", "qty_accepted_base", "pallet_count"]);
+    ensureTableColumns_("RECEIVING", ["base_unit", "units_per_purchase_unit", "qty_accepted_base", "pallet_count", "quality_status"]);
     ensureTableColumns_("LOTS", ["purchase_qty_received", "purchase_unit_type", "pallet_count"]);
 
     const receiving = {
@@ -458,12 +467,13 @@ function receiveProduct(payload) {
       qty_accepted_base: acceptedBaseQty,
       pallet_count: Number(input.pallet_count || 0),
       quality_score: Number(input.quality_score || 5),
+      quality_status: qualityStatus,
       product_accuracy_score: 5,
-      over_under_status: "MATCH",
-      recommended_location_id: recommendedLocation.location_id,
+      over_under_status: quantityStatus,
+      recommended_location_id: "",
       confirmed_location_id: confirmedLocationId,
-      requires_supervisor_approval: false,
-      approval_status: "APPROVED",
+      requires_supervisor_approval: qualityStatus !== "PASS" || quantityStatus === "OVER",
+      approval_status: approvalStatus,
       notes: input.notes || ""
     };
 
@@ -484,7 +494,7 @@ function receiveProduct(payload) {
       unit_cost: Number(line.unit_cost || 0),
       currency: line.currency || "USD",
       current_location_id: confirmedLocationId,
-      status: "ACTIVE",
+      status: qualityStatus === "PASS" ? "ACTIVE" : qualityStatus,
       expiration_date: "",
       qr_value: internalLotId,
       label_printed_status: "NOT_PRINTED",
@@ -513,14 +523,14 @@ function receiveProduct(payload) {
       related_amazon_order_id: "",
       scan_code: input.scan_code || internalLotId,
       device_id: "WEB_APP",
-      approval_status: "APPROVED",
+      approval_status: approvalStatus,
       notes: input.notes || ""
     };
 
     appendRecord_("RECEIVING", receiving);
     appendRecord_("LOTS", lot);
     appendRecord_("INVENTORY_MOVEMENTS", movement);
-    updatePoLineReceived_(input.po_line_id, qtyReceived);
+    updatePoLineReceived_(input.po_line_id, acceptedQty);
     updatePoStatus_(input.po_id);
 
     return { receiving, lot, movement };
