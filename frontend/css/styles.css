@@ -1050,7 +1050,16 @@ tr:last-child td {
   }
 
   .dashboard-metrics {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dashboard-metric {
+    min-height: 170px;
+    padding: 12px;
+  }
+
+  .dashboard-metric strong {
+    font-size: 24px;
   }
 
   .card strong {
@@ -1104,5 +1113,11 @@ tr:last-child td {
 
   .receiving-line-state {
     align-self: center;
+  }
+}
+
+@media (max-width: 360px) {
+  .dashboard-metrics {
+    grid-template-columns: 1fr;
   }
 }
