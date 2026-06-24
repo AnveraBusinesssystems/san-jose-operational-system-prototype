@@ -60,6 +60,7 @@ function handleApiRequest_(action, payloadText, callback) {
     const routes = {
       getDashboard,
       listProducts,
+      createOpeningInventory,
       listUsers,
       createUser,
       createProduct,
@@ -128,6 +129,46 @@ function getDashboard() {
 
 function listProducts() {
   return readTable_("PRODUCTS");
+}
+
+function createOpeningInventory(payload) {
+  payload = payload || {};
+  const user = payload.user || {};
+  requirePermission_(user, "receiving:create");
+  const input = payload.input || {};
+  const name = String(input.product_name || "").trim();
+  const qty = Number(input.qty || 0);
+  const weight = Number(input.purchase_unit_weight || 0);
+  const location = readTable_("LOCATIONS").find((row) => row.location_id === input.location_id || row.qr_value === input.location_id);
+  if (!name || !isFinite(qty) || qty <= 0 || !isFinite(weight) || weight <= 0 || !location) {
+    throw new Error("Complete product, quantity, weight, and inventory space.");
+  }
+  const lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  try {
+    const products = readTable_("PRODUCTS");
+    let product = products.find((row) => String(row.product_name || "").trim().toLowerCase() === name.toLowerCase());
+    if (!product) {
+      product = createProduct({ user: user, input: { product_name: name, product_category: input.product_category || "General", perishability_days: Number(input.perishability_days || 0) } });
+    }
+    ensureTableColumns_("LOTS", ["purchase_qty_received", "purchase_unit_type", "current_qty_script", "current_location_id", "qr_value"]);
+    const lots = readTable_("LOTS");
+    const lot = {
+      internal_lot_id: nextId_("LOTS", "internal_lot_id", "LOT"), product_id: product.product_id,
+      supplier_lot_number: input.supplier_lot_number || "OPENING", received_date: new Date(),
+      original_qty: qty * weight, current_qty_script: qty * weight, unit_type: "LB",
+      purchase_qty_received: qty, purchase_unit_type: input.purchase_unit || "UNIT",
+      current_location_id: location.location_id, status: "ACTIVE", qr_value: "", notes: "Opening inventory count."
+    };
+    lot.qr_value = lot.internal_lot_id;
+    const movement = {
+      movement_id: nextId_("INVENTORY_MOVEMENTS", "movement_id", "MOV"), movement_type: "OPENING_INVENTORY", timestamp: new Date(), user_id: user.user_id || user.role,
+      product_id: product.product_id, internal_lot_id: lot.internal_lot_id, qty_change: lot.original_qty, unit_type: "LB",
+      from_location_id: "OPENING_COUNT", to_location_id: location.location_id, scan_code: lot.internal_lot_id, device_id: "WEB_APP", approval_status: "APPROVED", notes: input.notes || ""
+    };
+    appendRecord_("LOTS", lot); appendRecord_("INVENTORY_MOVEMENTS", movement);
+    return { product: product, lot: lot, movement: movement };
+  } finally { lock.releaseLock(); }
 }
 
 function listUsers() {
