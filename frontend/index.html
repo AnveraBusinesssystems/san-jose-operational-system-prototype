@@ -5,16 +5,21 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>San Jose Operations Prototype</title>
     <link rel="preload" as="image" href="./operations-center-bg.jpg" fetchpriority="high">
-    <link rel="stylesheet" href="./css/styles.css?v=pin1">
+    <link rel="stylesheet" href="./css/styles.css?v=welcome1">
     <link rel="stylesheet" href="./css/reports-mobile.css?v=opsreports3">
     <link rel="stylesheet" href="./css/smooth.css?v=smooth1">
-    <script type="module" src="./js/app-smooth1.js?v=pin1"></script>
+    <script type="module" src="./js/app-smooth1.js?v=welcome1"></script>
   </head>
   <body>
     <section id="loginScreen" class="login-screen" aria-label="Operations Center sign in">
       <div class="login-overlay"></div>
       <div class="login-content">
-        <div class="login-heading"><h1>Operations<br>Center</h1></div>
+        <div class="login-heading">
+          <img src="../SAN_JOSE_LOGOS.png" alt="San José Farms">
+          <p class="eyebrow">SAN JOSE OPERATIONS</p>
+          <h1>Operations Center</h1>
+          <p class="login-subtitle">Inventory, receiving, orders, and warehouse movement in one workspace.</p>
+        </div>
         <form id="pinForm" class="pin-card">
           <p id="pinRoleLabel" class="eyebrow">TEAM ACCESS</p>
           <h2>Enter your 4-digit code</h2>
@@ -25,7 +30,6 @@
       </div>
       <div class="login-footer">
         <p>Every product is carefully selected and packed in our facility near Aquila, Michoacán preserving quality, tradition, and flavor.</p>
-        <img src="../SAN_JOSE_LOGOS.png" alt="San José Farms">
       </div>
     </section>
     <div id="app" hidden>
