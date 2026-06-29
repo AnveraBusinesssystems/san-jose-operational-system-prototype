@@ -1,7 +1,8 @@
 /* V2 contrast fixes loaded after professional.css.
    Keeps the QuickBooks-style cleaner UI while forcing the left menu to stay readable. */
 
-.mobile-home-button {
+.mobile-home-button,
+.mobile-menu-sign-out {
   display: none !important;
 }
 
@@ -89,11 +90,27 @@
 }
 
 @media (max-width: 700px) {
+  .topbar {
+    grid-template-columns: auto minmax(0, 1fr) !important;
+  }
+
+  .topbar .user-panel {
+    display: none !important;
+  }
+
+  .mobile-nav-actions {
+    align-items: center;
+    display: flex !important;
+    gap: 6px !important;
+  }
+
   body.menu-open #app aside.sidebar,
   body.menu-open #app .sidebar {
     background: #ffffff !important;
     border-right: 1px solid #cbd6cf !important;
     color: #152019 !important;
+    display: flex !important;
+    flex-direction: column;
   }
 
   body.menu-open #app .sidebar .brand {
@@ -107,6 +124,11 @@
   body.menu-open #app .sidebar .brand div,
   body.menu-open #app .sidebar .brand span {
     color: #152019 !important;
+  }
+
+  body.menu-open #app .sidebar .nav {
+    flex: 1;
+    overflow-y: auto;
   }
 
   body.menu-open #app .sidebar .nav a,
@@ -133,5 +155,17 @@
     border-left-color: #23613a !important;
     color: #16472a !important;
     font-weight: 800 !important;
+  }
+
+  body.menu-open #app .mobile-menu-sign-out {
+    background: #ffffff !important;
+    border: 1px solid #cbd6cf !important;
+    border-radius: 3px !important;
+    color: #9f2f2f !important;
+    display: block !important;
+    font-weight: 800 !important;
+    margin: auto 10px 12px !important;
+    min-height: 44px !important;
+    width: calc(100% - 20px) !important;
   }
 }
