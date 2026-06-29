@@ -1,0 +1,125 @@
+/* V2 contrast fixes loaded after professional.css.
+   Keeps the QuickBooks-style cleaner UI while forcing the left menu to stay readable. */
+
+@media (min-width: 701px) {
+  body #app aside.sidebar,
+  body #app .sidebar {
+    background: #102218 !important;
+    border-right: 0 !important;
+    color: #ffffff !important;
+  }
+
+  body #app .sidebar .brand {
+    background: #0d1d14 !important;
+    color: #ffffff !important;
+  }
+
+  body #app .sidebar .brand strong,
+  body #app .sidebar .brand small,
+  body #app .sidebar .brand div,
+  body #app .sidebar .brand span {
+    color: #ffffff !important;
+  }
+
+  body #app .sidebar .nav,
+  body #app .sidebar #nav {
+    background: transparent !important;
+  }
+
+  body #app .sidebar .nav a,
+  body #app .sidebar .nav button,
+  body #app .sidebar .nav .nav-link,
+  body #app .sidebar #nav a,
+  body #app .sidebar #nav button,
+  body #app .sidebar #nav .nav-link {
+    align-items: center;
+    background: transparent !important;
+    border: 0 !important;
+    border-left: 3px solid transparent !important;
+    border-radius: 2px !important;
+    box-shadow: none !important;
+    color: rgba(255, 255, 255, 0.84) !important;
+    display: flex;
+    font-weight: 600 !important;
+    justify-content: flex-start;
+    min-height: 38px !important;
+    padding: 9px 10px !important;
+    text-align: left;
+    width: 100%;
+  }
+
+  body #app .sidebar .nav a *,
+  body #app .sidebar .nav button *,
+  body #app .sidebar #nav a *,
+  body #app .sidebar #nav button * {
+    color: inherit !important;
+  }
+
+  body #app .sidebar .nav a:hover,
+  body #app .sidebar .nav button:hover,
+  body #app .sidebar #nav a:hover,
+  body #app .sidebar #nav button:hover {
+    background: rgba(255, 255, 255, 0.08) !important;
+    color: #ffffff !important;
+  }
+
+  body #app .sidebar .nav a.active,
+  body #app .sidebar .nav button.active,
+  body #app .sidebar .nav [aria-current="page"],
+  body #app .sidebar #nav a.active,
+  body #app .sidebar #nav button.active,
+  body #app .sidebar #nav [aria-current="page"] {
+    background: rgba(255, 255, 255, 0.13) !important;
+    border-left-color: #8ccf9f !important;
+    color: #ffffff !important;
+    font-weight: 800 !important;
+  }
+}
+
+@media (max-width: 700px) {
+  body.menu-open #app aside.sidebar,
+  body.menu-open #app .sidebar {
+    background: #ffffff !important;
+    border-right: 1px solid #cbd6cf !important;
+    color: #152019 !important;
+  }
+
+  body.menu-open #app .sidebar .brand {
+    background: #f8faf8 !important;
+    border-bottom: 1px solid #cbd6cf !important;
+    color: #152019 !important;
+  }
+
+  body.menu-open #app .sidebar .brand strong,
+  body.menu-open #app .sidebar .brand small,
+  body.menu-open #app .sidebar .brand div,
+  body.menu-open #app .sidebar .brand span {
+    color: #152019 !important;
+  }
+
+  body.menu-open #app .sidebar .nav a,
+  body.menu-open #app .sidebar .nav button,
+  body.menu-open #app .sidebar #nav a,
+  body.menu-open #app .sidebar #nav button {
+    background: transparent !important;
+    border: 0 !important;
+    border-left: 3px solid transparent !important;
+    border-radius: 2px !important;
+    color: #152019 !important;
+    min-height: 44px !important;
+    text-align: left;
+    width: 100%;
+  }
+
+  body.menu-open #app .sidebar .nav a.active,
+  body.menu-open #app .sidebar .nav button.active,
+  body.menu-open #app .sidebar .nav [aria-current="page"],
+  body.menu-open #app .sidebar #nav a.active,
+  body.menu-open #app .sidebar #nav button.active,
+  body.menu-open #app .sidebar #nav [aria-current="page"] {
+    background: #e8f2eb !important;
+    border-left-color: #23613a !important;
+    color: #16472a !important;
+    font-weight: 800 !important;
+  }
+}
