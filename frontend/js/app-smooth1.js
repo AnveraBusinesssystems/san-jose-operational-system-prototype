@@ -138,7 +138,8 @@ document.getElementById("menuToggle").addEventListener("click", () => {
 
 document.getElementById("mobileHomeButton")?.addEventListener("click", () => {
   document.body.classList.remove("menu-open");
-  navigate("mobileHome");
+  window.location.hash = "mobileHome";
+  renderRoute();
 });
 
 function usesWarehouseHome() {
