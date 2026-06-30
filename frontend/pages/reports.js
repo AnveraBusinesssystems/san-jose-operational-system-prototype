@@ -45,7 +45,7 @@ export async function render(ctx) {
           <div class="reports-health-pill">${healthSummary(reports)}</div>
         </div>
 
-        <div class="formula-strip">
+        <div class="formula-strip" aria-label="Inventory planning formula summary">
           <div><span>Current Qty</span><strong>Active lots on hand</strong></div>
           <div><span>Avg Usage</span><strong>90-day shipped sales ÷ 90</strong></div>
           <div><span>Reorder Point</span><strong>Lead-time demand + safety stock</strong></div>
@@ -121,7 +121,7 @@ function inventoryPlanning(reports) {
     <div class="panel-header report-detail-heading">
       <div>
         <h2>Inventory Planning Metrics</h2>
-        <p class="muted">Shows only products with reorder/watch rules or calculated usage.</p>
+        <p class="muted">Shows products with reorder/watch rules, supplier timing, or calculated usage.</p>
       </div>
       <div class="actions">
         <span class="status warn">Reorder ${countStatus(rows, "REORDER")}</span>
@@ -260,48 +260,63 @@ function formatDate(value) {
 }
 
 function ensureReportStyles() {
-  if (document.getElementById("reportsPageStyles")) return;
-  const style = document.createElement("style");
+  const existing = document.getElementById("reportsPageStyles");
+  const style = existing || document.createElement("style");
   style.id = "reportsPageStyles";
   style.textContent = `
-    .reports-page { display: grid; gap: 14px; }
-    .reports-overview { overflow: hidden; }
-    .reports-header { align-items: flex-start; }
-    .reports-health-pill { background: #e9f4ed; border: 1px solid #cfe3d6; border-radius: 999px; color: #17613f; font-size: 12px; font-weight: 850; padding: 7px 11px; white-space: nowrap; }
-    .formula-strip { background: #f8fbf9; border: 1px solid var(--line); border-radius: 12px; display: grid; gap: 1px; grid-template-columns: repeat(4, minmax(0, 1fr)); margin-bottom: 14px; overflow: hidden; }
-    .formula-strip div { background: white; min-height: 74px; padding: 12px; }
-    .formula-strip span { color: var(--muted); display: block; font-size: 11px; font-weight: 850; text-transform: uppercase; }
-    .formula-strip strong { color: var(--ink); display: block; font-size: 13px; line-height: 1.3; margin-top: 5px; }
+    .reports-page { display: grid; gap: 16px; }
+    .reports-overview { overflow: hidden; padding: 18px; }
+    .reports-header { align-items: flex-start; margin-bottom: 12px; }
+    .reports-health-pill { background: #eef7f1; border: 1px solid #cfe3d6; border-radius: 999px; color: #17613f; font-size: 12px; font-weight: 850; padding: 7px 11px; white-space: nowrap; }
+    .formula-strip { background: #edf3ef; border: 1px solid var(--line); border-radius: 12px; display: grid; gap: 1px; grid-template-columns: repeat(4, minmax(0, 1fr)); margin-bottom: 14px; overflow: hidden; }
+    .formula-strip div { background: #ffffff; min-height: 70px; padding: 12px 14px; }
+    .formula-strip span { color: #667568; display: block; font-size: 11px; font-weight: 850; letter-spacing: .04em; text-transform: uppercase; }
+    .formula-strip strong { color: #17211b; display: block; font-size: 13px; line-height: 1.32; margin-top: 6px; }
     .report-summary-grid { display: grid; gap: 12px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
     .report-summary-card,
     .card.report-block,
-    button.report-block { background: #ffffff !important; border: 1px solid var(--line) !important; border-radius: 12px !important; box-shadow: 0 6px 18px rgba(23,33,27,.05) !important; color: var(--ink) !important; min-height: 156px; padding: 15px; text-align: left; transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease; }
+    button.report-block { background: #ffffff !important; border: 1px solid #d8e1da !important; border-radius: 12px !important; box-shadow: 0 6px 18px rgba(23,33,27,.05) !important; color: #17211b !important; min-height: 148px; padding: 15px; text-align: left; transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease; }
     .report-summary-card:hover,
     .card.report-block:hover,
-    button.report-block:hover { border-color: #a9c7b4 !important; box-shadow: 0 10px 24px rgba(23,33,27,.09) !important; transform: translateY(-1px); }
+    button.report-block:hover { border-color: #9fc4ab !important; box-shadow: 0 10px 24px rgba(23,33,27,.09) !important; transform: translateY(-1px); }
     .report-summary-card.selected,
     .card.report-block.selected,
-    button.report-block.selected { background: linear-gradient(180deg, #ffffff 0%, #f3faf5 100%) !important; border-color: var(--primary) !important; box-shadow: inset 0 4px 0 var(--primary), 0 10px 24px rgba(23,33,27,.09) !important; color: var(--ink) !important; }
+    button.report-block.selected { background: linear-gradient(180deg, #ffffff 0%, #f4faf6 100%) !important; border-color: #186b45 !important; box-shadow: inset 0 4px 0 #186b45, 0 10px 24px rgba(23,33,27,.09) !important; color: #17211b !important; }
     .report-summary-card strong,
     .card.report-block strong,
-    button.report-block strong { color: var(--primary) !important; display: block; font-size: 34px; letter-spacing: -.04em; line-height: 1; margin: 8px 0 10px; }
-    .report-summary-card h3,
+    button.report-block strong { color: #186b45 !important; display: block; font-size: 34px; letter-spacing: -.04em; line-height: 1; margin: 8px 0 11px; }
+    .report-summary-card h3 { color: #17211b !important; font-size: 16px; font-weight: 850; line-height: 1.2; margin: 0 0 6px; }
     .card.report-block span,
-    button.report-block span { color: var(--ink) !important; font-size: 15px; margin: 0 0 5px; }
+    button.report-block span { color: #17211b !important; font-size: 15px; font-weight: 850; }
     .report-summary-card small,
     .card.report-block small,
-    button.report-block small { color: var(--muted) !important; display: block; font-size: 12px; line-height: 1.35; min-height: 33px; }
-    .report-summary-card em { color: var(--primary); display: block; font-size: 12px; font-style: normal; font-weight: 850; margin-top: 12px; }
-    .report-card-label { color: var(--muted); display: block; font-size: 11px; font-weight: 850; text-transform: uppercase; }
-    .report-detail-panel { min-height: 260px; }
+    button.report-block small { color: #607064 !important; display: block; font-size: 12px; line-height: 1.38; min-height: 33px; }
+    .report-summary-card em { color: #186b45; display: block; font-size: 12px; font-style: normal; font-weight: 850; margin-top: 12px; }
+    .report-card-label { color: #667568 !important; display: block; font-size: 11px; font-weight: 850; letter-spacing: .04em; text-transform: uppercase; }
+    .report-detail-panel { min-height: 260px; padding: 18px; }
     .report-detail-heading p { margin: 4px 0 0; }
-    .formula-note { background: #f8fbf9; border: 1px solid var(--line); border-radius: 10px; color: var(--muted); font-size: 13px; line-height: 1.45; margin-bottom: 14px; padding: 12px 13px; }
-    .formula-note strong { color: var(--ink); }
-    .report-empty-state { align-items: center; background: #f8fbf9; border: 1px dashed #b9cabe; border-radius: 12px; color: var(--muted); display: grid; justify-items: center; min-height: 190px; padding: 24px; text-align: center; }
-    .report-empty-state strong { color: var(--ink); font-size: 18px; }
+    .formula-note { background: #f8fbf9; border: 1px solid #d8e1da; border-radius: 10px; color: #607064; font-size: 13px; line-height: 1.45; margin-bottom: 14px; padding: 12px 13px; }
+    .formula-note strong { color: #17211b; }
+    .report-empty-state { align-items: center; background: #f8fbf9; border: 1px dashed #b9cabe; border-radius: 12px; color: #607064; display: grid; justify-items: center; min-height: 190px; padding: 24px; text-align: center; }
+    .report-empty-state strong { color: #17211b; font-size: 18px; }
     .report-empty-state p { max-width: 520px; margin: 8px 0 0; }
-    @media (max-width: 1100px) { .report-summary-grid, .formula-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-    @media (max-width: 700px) { .report-summary-grid, .formula-strip { grid-template-columns: 1fr; } .reports-health-pill { white-space: normal; } }
+    .report-detail-panel .table-tools { align-items: center; background: #ffffff; border: 1px solid #d8e1da; border-radius: 12px; margin: 0 0 12px; padding: 10px; }
+    .report-detail-panel .table-filter { min-width: min(320px, 100%); }
+    .report-detail-panel table { font-size: 13px; }
+    .report-detail-panel th { letter-spacing: .04em; }
+    @media (max-width: 1200px) { .report-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .formula-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    @media (max-width: 700px) {
+      .reports-overview, .report-detail-panel { padding: 14px; }
+      .reports-header { gap: 8px; }
+      .reports-health-pill { white-space: normal; width: fit-content; }
+      .report-summary-grid, .formula-strip { grid-template-columns: 1fr; }
+      .formula-strip div { min-height: auto; padding: 11px 12px; }
+      .report-summary-card { min-height: 122px; padding: 14px; }
+      .report-summary-card strong { font-size: 30px; }
+      .report-detail-panel .table-tools { align-items: stretch; display: grid; justify-content: stretch; }
+      .report-detail-panel .table-tools label { align-items: stretch; display: grid; width: 100%; }
+      .report-detail-panel .table-filter { min-width: 0; width: 100%; }
+    }
   `;
-  document.head.appendChild(style);
+  if (!existing) document.head.appendChild(style);
 }
