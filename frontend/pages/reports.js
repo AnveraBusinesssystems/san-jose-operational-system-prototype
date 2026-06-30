@@ -273,12 +273,24 @@ function ensureReportStyles() {
     .formula-strip span { color: var(--muted); display: block; font-size: 11px; font-weight: 850; text-transform: uppercase; }
     .formula-strip strong { color: var(--ink); display: block; font-size: 13px; line-height: 1.3; margin-top: 5px; }
     .report-summary-grid { display: grid; gap: 12px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
-    .report-summary-card { background: white; border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 6px 18px rgba(23,33,27,.05); color: var(--ink); min-height: 156px; padding: 15px; text-align: left; transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease; }
-    .report-summary-card:hover { border-color: #a9c7b4; box-shadow: 0 10px 24px rgba(23,33,27,.09); transform: translateY(-1px); }
-    .report-summary-card.selected { background: linear-gradient(180deg, #ffffff 0%, #f3faf5 100%); border-color: var(--primary); box-shadow: inset 0 4px 0 var(--primary), 0 10px 24px rgba(23,33,27,.09); }
-    .report-summary-card strong { color: var(--primary); display: block; font-size: 34px; letter-spacing: -.04em; line-height: 1; margin: 8px 0 10px; }
-    .report-summary-card h3 { font-size: 15px; margin: 0 0 5px; }
-    .report-summary-card small { color: var(--muted); display: block; font-size: 12px; line-height: 1.35; min-height: 33px; }
+    .report-summary-card,
+    .card.report-block,
+    button.report-block { background: #ffffff !important; border: 1px solid var(--line) !important; border-radius: 12px !important; box-shadow: 0 6px 18px rgba(23,33,27,.05) !important; color: var(--ink) !important; min-height: 156px; padding: 15px; text-align: left; transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease; }
+    .report-summary-card:hover,
+    .card.report-block:hover,
+    button.report-block:hover { border-color: #a9c7b4 !important; box-shadow: 0 10px 24px rgba(23,33,27,.09) !important; transform: translateY(-1px); }
+    .report-summary-card.selected,
+    .card.report-block.selected,
+    button.report-block.selected { background: linear-gradient(180deg, #ffffff 0%, #f3faf5 100%) !important; border-color: var(--primary) !important; box-shadow: inset 0 4px 0 var(--primary), 0 10px 24px rgba(23,33,27,.09) !important; color: var(--ink) !important; }
+    .report-summary-card strong,
+    .card.report-block strong,
+    button.report-block strong { color: var(--primary) !important; display: block; font-size: 34px; letter-spacing: -.04em; line-height: 1; margin: 8px 0 10px; }
+    .report-summary-card h3,
+    .card.report-block span,
+    button.report-block span { color: var(--ink) !important; font-size: 15px; margin: 0 0 5px; }
+    .report-summary-card small,
+    .card.report-block small,
+    button.report-block small { color: var(--muted) !important; display: block; font-size: 12px; line-height: 1.35; min-height: 33px; }
     .report-summary-card em { color: var(--primary); display: block; font-size: 12px; font-style: normal; font-weight: 850; margin-top: 12px; }
     .report-card-label { color: var(--muted); display: block; font-size: 11px; font-weight: 850; text-transform: uppercase; }
     .report-detail-panel { min-height: 260px; }
