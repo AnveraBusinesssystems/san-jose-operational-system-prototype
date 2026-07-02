@@ -41,6 +41,7 @@ export async function render(ctx) {
         </div>
         <div class="field">
           <label>Product name</label>
+          <input id="openingProductId" name="product_id" type="hidden">
           <input id="openingProduct" name="product_name" list="products" required>
           <datalist id="products">${products.map((product) => `<option value="${escapeHtml(product.product_name)}"></option>`).join("")}</datalist>
         </div>
@@ -63,10 +64,21 @@ export async function render(ctx) {
 
   const form = document.getElementById("openingForm");
   const productInput = document.getElementById("openingProduct");
+  const productIdInput = document.getElementById("openingProductId");
   const lotSelect = document.getElementById("openingLot");
   const locationSelect = document.getElementById("openingLocations");
   const locationCount = document.getElementById("openingLocationCount");
   const useAllSpaces = document.getElementById("openingUseAllSpaces");
+
+  const findSelectedProduct = () => products.find((item) =>
+    item.product_name.toLowerCase() === productInput.value.trim().toLowerCase()
+  );
+
+  const syncSelectedProduct = () => {
+    const product = findSelectedProduct();
+    productIdInput.value = product?.product_id || "";
+    return product;
+  };
 
   const updateLocationCount = () => {
     const count = useAllSpaces.checked ? locationSelect.options.length : locationSelect.selectedOptions.length;
@@ -74,7 +86,7 @@ export async function render(ctx) {
   };
 
   const refreshLots = () => {
-    const product = products.find((item) => item.product_name.toLowerCase() === productInput.value.trim().toLowerCase());
+    const product = syncSelectedProduct();
     const uniqueLots = new Map();
     lots.filter((lot) => !product || lot.product_id === product.product_id).forEach((lot) => {
       const key = String(lot.supplier_lot_number || lot.internal_lot_id).trim();
@@ -121,6 +133,7 @@ export async function render(ctx) {
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
+    syncSelectedProduct();
     const locationIds = Array.from(useAllSpaces.checked ? locationSelect.options : locationSelect.selectedOptions).map((option) => option.value);
     if (!locationIds.length) {
       notice("Select at least one available space.");
