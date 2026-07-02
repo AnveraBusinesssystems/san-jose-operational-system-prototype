@@ -2,7 +2,7 @@ name: Sync Code.gs Backend Actions
 
 on:
   push:
-    branches: [ main, professional-ui-refresh ]
+    branches: [ main ]
     paths:
       - '.github/workflows/sync-codegs-supplier-actions.yml'
   workflow_dispatch:
@@ -15,6 +15,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: professional-ui-refresh
       - name: Merge backend actions into Code.gs
         run: |
           python3 <<'PY'
@@ -22,19 +24,6 @@ jobs:
 
           path = Path('apps-script/Code.gs')
           text = path.read_text()
-
-          supplier_route_before = '''      listSuppliers: listSuppliers,
-      createSupplier: createSupplier,
-      listLocations: listLocations,'''
-          supplier_route_after = '''      listSuppliers: listSuppliers,
-      createSupplier: createSupplier,
-      updateSupplier: updateSupplier,
-      deactivateSupplier: deactivateSupplier,
-      listLocations: listLocations,'''
-          if supplier_route_after not in text:
-              if supplier_route_before not in text:
-                  raise SystemExit('Could not find supplier route block in Code.gs')
-              text = text.replace(supplier_route_before, supplier_route_after, 1)
 
           send_route_before = '''      receiveProduct: receiveProduct,
       recordInventoryMovement: recordInventoryMovement,
@@ -47,77 +36,6 @@ jobs:
               if send_route_before not in text:
                   raise SystemExit('Could not find inventory movement route block in Code.gs')
               text = text.replace(send_route_before, send_route_after, 1)
-
-          supplier_function_block = r'''
-function updateSupplier(payload) {
-  payload = payload || {};
-  requirePermission_(payload.user, "suppliers:create");
-
-  const input = payload.input || {};
-  const supplierId = String(input.supplier_id || "").trim();
-  const partyType = normalizePartyType_(input.party_type);
-  const supplierName = String(input.supplier_name || "").trim();
-
-  if (!supplierId) throw new Error("Business record ID is required.");
-  if (!supplierName) throw new Error("Business name is required.");
-
-  ensureTableColumns_("SUPPLIERS", ["supplier_id", "supplier_name", "contact_name", "email", "phone", "address", "payment_terms", "default_currency", "lead_time_expected_days", "is_active", "created_at", "updated_at", "notes", "party_type"]);
-
-  const existing = readTable_("SUPPLIERS").find((row) => String(row.supplier_id || "") === supplierId);
-  if (!existing) throw new Error("Business record was not found.");
-
-  const changes = {
-    supplier_name: supplierName,
-    contact_name: input.contact_name || "",
-    email: input.email || "",
-    phone: input.phone || "",
-    address: input.address || "",
-    payment_terms: input.payment_terms || "Net 30",
-    default_currency: input.default_currency || "USD",
-    lead_time_expected_days: partyType === "VENDOR" ? num_(input.lead_time_expected_days, 5) : "",
-    is_active: true,
-    updated_at: nowIso_(),
-    notes: input.notes || "",
-    party_type: partyType
-  };
-
-  updateTableRecord_("SUPPLIERS", "supplier_id", supplierId, changes);
-
-  return readTable_("SUPPLIERS").find((row) => String(row.supplier_id || "") === supplierId);
-}
-
-function deactivateSupplier(payload) {
-  payload = payload || {};
-  requirePermission_(payload.user, "suppliers:create");
-
-  const supplierId = String(payload.supplierId || payload.supplier_id || "").trim();
-  if (!supplierId) throw new Error("Business record ID is required.");
-
-  const existing = readTable_("SUPPLIERS").find((row) => String(row.supplier_id || "") === supplierId);
-  if (!existing) throw new Error("Business record was not found.");
-
-  updateTableRecord_("SUPPLIERS", "supplier_id", supplierId, {
-    is_active: false,
-    updated_at: nowIso_()
-  });
-
-  return {
-    supplier_id: supplierId,
-    supplier_name: existing.supplier_name || supplierId,
-    party_type: normalizePartyType_(existing.party_type),
-    is_active: false
-  };
-}
-'''
-
-          if 'function updateSupplier(payload)' not in text:
-              marker = '''  appendRecord_("SUPPLIERS", record);
-  return record;
-}
-'''
-              if marker not in text:
-                  raise SystemExit('Could not find createSupplier ending in Code.gs')
-              text = text.replace(marker, marker + supplier_function_block + '\n', 1)
 
           send_function_block = r'''
 function sendProduct(payload) {
@@ -232,7 +150,7 @@ function updateSalesOrderProgressAfterSend_(salesOrderId, line, pickTask, qtySen
 
           path.write_text(text)
           PY
-      - name: Commit Code.gs sync
+      - name: Commit Code.gs sync to professional branch
         run: |
           if git diff --quiet -- apps-script/Code.gs; then
             echo "Code.gs already synced."
@@ -241,7 +159,7 @@ function updateSalesOrderProgressAfterSend_(salesOrderId, line, pickTask, qtySen
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add apps-script/Code.gs
-          git commit -m "Merge backend actions into Code.gs"
-          git push
+          git commit -m "Merge Send Product backend into Code.gs"
+          git push origin HEAD:professional-ui-refresh
 
-# Triggered manually by ChatGPT on request to make Code.gs the single paste-ready Apps Script source.
+# Triggered manually by ChatGPT to make professional-ui-refresh Code.gs the paste-ready Apps Script source.
