@@ -16,7 +16,6 @@ const permissions = {
     "receiving:view", "receiving:create",
     "inventory:view", "inventory:adjust",
     "scanner:test",
-    "amazon:view",
     "admin:view",
     "reports:view"
   ],
@@ -31,7 +30,6 @@ const permissions = {
     "receiving:view", "receiving:create",
     "inventory:view", "inventory:adjust",
     "scanner:test",
-    "amazon:view",
     "reports:view"
   ],
   OPERATOR: [
@@ -40,8 +38,7 @@ const permissions = {
     "sendProduct:view", "sendProduct:create",
     "receiving:view", "receiving:create",
     "inventory:view", "inventory:adjust",
-    "scanner:test",
-    "amazon:view"
+    "scanner:test"
   ]
 };
 
@@ -70,7 +67,6 @@ export function allowedPages(user) {
     { id: "openingInventory", label: "Opening Inventory", permission: "receiving:view" },
     { id: "inventory", label: "Inventory Lookup", permission: "inventory:view" },
     { id: "scanner", label: "Scanner Test", permission: "scanner:test" },
-    { id: "amazon", label: "Amazon Outbound", permission: "amazon:view" },
     { id: "reports", label: "Reports", permission: "reports:view" },
     { id: "admin", label: "Admin", permission: "admin:view" }
   ];
