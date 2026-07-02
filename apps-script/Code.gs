@@ -46,6 +46,7 @@ const ROUTES = {
   createSalesOrder,
   salesOrderAction,
   receiveProduct,
+  sendProduct,
   recordInventoryMovement,
   recordAmazonOutbound,
   listAmazonOutboundActivity,
@@ -502,13 +503,225 @@ function createOpeningInventory(payload) {
   return { product, lot: lots[0], movement: movements[0], lots, movements };
 }
 
+function findLotByScan_(value) {
+  const key = text_(value);
+  if (!key) return null;
+  return readTable_("LOTS").find(lot =>
+    [lot.internal_lot_id, lot.qr_value, lot.supplier_lot_number].map(String).indexOf(key) >= 0
+  ) || null;
+}
+
+function outboundMovementType_(type) {
+  return ["SALE", "AMAZON_OUT", "ADJUST_OUT", "USE", "WASTE", "SAMPLE", "TRANSFER_OUT"].indexOf(upper_(type)) >= 0;
+}
+
+function inboundMovementType_(type) {
+  return ["ADJUST_IN", "RECEIVE", "RETURN", "OPENING_INVENTORY", "TRANSFER_IN"].indexOf(upper_(type)) >= 0;
+}
+
+function movementQtyChange_(input) {
+  if (input.qty_change !== undefined && input.qty_change !== "") return n_(input.qty_change, 0);
+  const qty = Math.abs(n_(input.qty, 0));
+  if (!qty) return 0;
+  const type = upper_(input.movement_type || "SALE");
+  return inboundMovementType_(type) ? qty : -qty;
+}
+
+function applyLotQuantityChange_(lot, qtyChange, movementType) {
+  if (!lot || !lot.internal_lot_id) return;
+  const currentQty = lotQty_(lot);
+  const nextQty = Math.max(0, currentQty + qtyChange);
+  if (qtyChange < 0 && Math.abs(qtyChange) - currentQty > 0.0001) {
+    throw new Error(`Not enough inventory in lot ${lot.internal_lot_id}. Available ${currentQty}, requested ${Math.abs(qtyChange)}.`);
+  }
+
+  const changes = {
+    current_qty_script: nextQty,
+    updated_at: now_()
+  };
+
+  if (outboundMovementType_(movementType) && nextQty <= 0.0001) {
+    changes.status = "EMPTY";
+  } else if (inboundMovementType_(movementType) && nextQty > 0 && upper_(lot.status) === "EMPTY") {
+    changes.status = "ACTIVE";
+  }
+
+  updateRecord_("LOTS", "internal_lot_id", lot.internal_lot_id, changes);
+}
+
+function sendProduct(payload) {
+  const user = (payload || {}).user || {};
+  const input = (payload || {}).input || payload || {};
+  require_(user, "inventory:adjust");
+
+  const salesOrderId = text_(input.related_sales_order_id || input.sales_order_id);
+  const salesOrderLineId = text_(input.sales_order_line_id);
+  const scannedLot = findLotByScan_(input.internal_lot_id || input.lot_id || input.scan_code);
+  const qtyBase = Math.abs(n_(input.qty || input.qty_to_send || input.qty_change, 0));
+
+  if (!scannedLot) throw new Error("Scan the physical lot/pallet QR before sending product.");
+  if (qtyBase <= 0) throw new Error("Quantity to send must be greater than zero.");
+
+  let line = null;
+  let pickTask = null;
+
+  if (salesOrderId) {
+    const order = readTable_("SALES_ORDERS").find(row => String(row.sales_order_id) === salesOrderId);
+    if (!order) throw new Error("Sales Order was not found.");
+
+    const orderLines = readTable_("SALES_ORDER_LINES").filter(row => String(row.sales_order_id) === salesOrderId);
+    line = salesOrderLineId
+      ? orderLines.find(row => String(row.sales_order_line_id) === salesOrderLineId)
+      : orderLines.find(row =>
+          String(row.product_id) === String(scannedLot.product_id) &&
+          String(row.preferred_internal_lot_id) === String(scannedLot.internal_lot_id)
+        );
+
+    if (!line) throw new Error("The scanned lot is not assigned to this Sales Order.");
+    if (String(line.product_id) !== String(scannedLot.product_id)) throw new Error("Scanned product does not match the Sales Order line.");
+    if (String(line.preferred_internal_lot_id || "") && String(line.preferred_internal_lot_id) !== String(scannedLot.internal_lot_id)) {
+      throw new Error("Scanned lot does not match the recommended Sales Order lot.");
+    }
+
+    const orderedSalesQty = n_(line.qty_ordered, 0);
+    const remainingSalesQty = n_(line.qty_remaining, orderedSalesQty);
+    const requiredBase = n_(line.inventory_qty_required, 0) || orderedSalesQty;
+    const remainingBase = orderedSalesQty > 0 ? requiredBase * (remainingSalesQty / orderedSalesQty) : requiredBase;
+    if (remainingBase > 0 && qtyBase - remainingBase > 0.0001) {
+      throw new Error(`Send quantity is higher than the remaining Sales Order quantity. Remaining base qty: ${remainingBase}.`);
+    }
+
+    pickTask = readTable_("PICK_TASKS").find(task => String(task.sales_order_line_id) === String(line.sales_order_line_id)) || null;
+  }
+
+  const movement = recordInventoryMovement({
+    user,
+    input: {
+      movement_type: upper_(input.movement_type || (salesOrderId ? "SALE" : "AMAZON_OUT")),
+      product_id: scannedLot.product_id,
+      internal_lot_id: scannedLot.internal_lot_id,
+      qty: qtyBase,
+      unit_type: input.unit_type || scannedLot.unit_type || "LB",
+      from_location_id: input.from_location_id || input.location_id || scannedLot.current_location_id || "",
+      to_location_id: input.to_location_id || (salesOrderId ? "CUSTOMER" : "OUTBOUND"),
+      related_sales_order_id: salesOrderId,
+      related_pick_task_id: pickTask ? pickTask.pick_task_id : input.related_pick_task_id || "",
+      related_amazon_order_id: input.related_amazon_order_id || input.amazon_order_id || "",
+      package_id: input.package_id || "",
+      scan_code: input.scan_code || scannedLot.qr_value || scannedLot.internal_lot_id,
+      device_id: input.device_id || "WEB_APP",
+      notes: input.notes || "Send Product scan."
+    }
+  });
+
+  return {
+    movement,
+    salesOrder: salesOrderId ? getSalesOrderDetail({ sales_order_id: salesOrderId }) : null
+  };
+}
+
+function updateSalesOrderProgressAfterSend_(salesOrderId, line, pickTask, qtySentBase) {
+  const orderedSalesQty = n_(line.qty_ordered, 0);
+  const requiredBase = n_(line.inventory_qty_required, 0) || orderedSalesQty;
+  const previousPicked = n_(line.qty_picked, 0);
+  const salesQtySent = requiredBase > 0 && orderedSalesQty > 0 ? qtySentBase / requiredBase * orderedSalesQty : qtySentBase;
+  const newPicked = Math.min(orderedSalesQty, previousPicked + salesQtySent);
+  const remaining = Math.max(0, orderedSalesQty - newPicked);
+  const lineStatus = remaining <= 0.0001 ? "PICKED" : "PARTIALLY_PICKED";
+
+  updateRecord_("SALES_ORDER_LINES", "sales_order_line_id", line.sales_order_line_id, {
+    qty_picked: newPicked,
+    qty_remaining: remaining,
+    line_status: lineStatus
+  });
+
+  if (pickTask) {
+    const taskTarget = n_(pickTask.qty_to_pick, orderedSalesQty);
+    const taskPicked = Math.min(taskTarget, n_(pickTask.qty_picked, 0) + salesQtySent);
+    updateRecord_("PICK_TASKS", "pick_task_id", pickTask.pick_task_id, {
+      qty_picked: taskPicked,
+      pick_status: lineStatus,
+      picked_at: now_(),
+      scan_code: line.preferred_internal_lot_id || pickTask.scan_code || "",
+      device_id: pickTask.device_id || "WEB_APP",
+      reservation_status: remaining <= 0.0001 ? "PICKED" : "RESERVED"
+    });
+  }
+
+  const freshLines = readTable_("SALES_ORDER_LINES").filter(row => String(row.sales_order_id) === String(salesOrderId));
+  const allPicked = freshLines.length > 0 && freshLines.every(row => n_(row.qty_remaining, 0) <= 0.0001 || upper_(row.line_status) === "PICKED");
+  const anyPicked = freshLines.some(row => n_(row.qty_picked, 0) > 0 || ["PICKED", "PARTIALLY_PICKED"].indexOf(upper_(row.line_status)) >= 0);
+
+  updateRecord_("SALES_ORDERS", "sales_order_id", salesOrderId, {
+    status: allPicked ? "PICKED" : anyPicked ? "PARTIALLY_PICKED" : "CONFIRMED",
+    picked_at: anyPicked ? now_() : "",
+    updated_at: now_()
+  });
+}
+
+function updateSalesProgressFromMovement_(movement, qtySentBase) {
+  const salesOrderId = text_(movement.related_sales_order_id);
+  if (!salesOrderId || !outboundMovementType_(movement.movement_type)) return;
+
+  const pickTask = movement.related_pick_task_id
+    ? readTable_("PICK_TASKS").find(task => String(task.pick_task_id) === String(movement.related_pick_task_id))
+    : null;
+
+  const lines = readTable_("SALES_ORDER_LINES").filter(line => String(line.sales_order_id) === salesOrderId);
+  const line = pickTask
+    ? lines.find(item => String(item.sales_order_line_id) === String(pickTask.sales_order_line_id))
+    : lines.find(item =>
+        String(item.product_id) === String(movement.product_id) &&
+        String(item.preferred_internal_lot_id) === String(movement.internal_lot_id)
+      );
+
+  if (!line) return;
+  updateSalesOrderProgressAfterSend_(salesOrderId, line, pickTask, Math.abs(qtySentBase));
+}
+
 function recordInventoryMovement(payload) {
   const user = (payload || {}).user || {};
   const input = (payload || {}).input || payload || {};
   require_(user, "inventory:adjust");
-  const movement = { movement_id: nextId_("INVENTORY_MOVEMENTS", "movement_id", "MOV"), movement_type: input.movement_type || "ADJUSTMENT", timestamp: now_(), user_id: user.user_id || user.role || "", product_id: input.product_id, internal_lot_id: input.internal_lot_id, package_id: input.package_id || "", qty_change: n_(input.qty_change !== undefined ? input.qty_change : input.qty, 0), unit_type: input.unit_type || "LB", from_location_id: input.from_location_id || "", to_location_id: input.to_location_id || "", related_po_id: input.related_po_id || "", related_receiving_id: input.related_receiving_id || "", related_sales_order_id: input.related_sales_order_id || "", related_pick_task_id: input.related_pick_task_id || "", related_amazon_order_id: input.related_amazon_order_id || "", scan_code: input.scan_code || input.internal_lot_id || "", device_id: input.device_id || "WEB_APP", approval_status: input.approval_status || "APPROVED", notes: input.notes || "" };
-  if (!movement.product_id || !movement.internal_lot_id || movement.qty_change === 0) throw new Error("Product, lot, and quantity change are required.");
+
+  const lot = findLotByScan_(input.internal_lot_id || input.lot_id || input.scan_code);
+  const type = upper_(input.movement_type || "ADJUSTMENT");
+  const qtyChange = movementQtyChange_(Object.assign({}, input, { movement_type: type }));
+
+  const productId = input.product_id || (lot && lot.product_id) || "";
+  const internalLotId = input.internal_lot_id || (lot && lot.internal_lot_id) || "";
+  if (!productId || !internalLotId || qtyChange === 0) throw new Error("Product, lot, and quantity change are required.");
+
+  if (lot) {
+    applyLotQuantityChange_(lot, qtyChange, type);
+  }
+
+  const canonicalLot = lot || { internal_lot_id: internalLotId, product_id: productId, unit_type: input.unit_type || "LB", current_location_id: input.from_location_id || input.location_id || "" };
+  const movement = {
+    movement_id: nextId_("INVENTORY_MOVEMENTS", "movement_id", "MOV"),
+    movement_type: type,
+    timestamp: now_(),
+    user_id: user.user_id || user.role || "",
+    product_id: productId,
+    internal_lot_id: canonicalLot.internal_lot_id,
+    package_id: input.package_id || "",
+    qty_change: qtyChange,
+    unit_type: input.unit_type || canonicalLot.unit_type || "LB",
+    from_location_id: input.from_location_id || (qtyChange < 0 ? canonicalLot.current_location_id || "" : ""),
+    to_location_id: input.to_location_id || (qtyChange > 0 ? canonicalLot.current_location_id || "" : "OUTBOUND"),
+    related_po_id: input.related_po_id || "",
+    related_receiving_id: input.related_receiving_id || "",
+    related_sales_order_id: input.related_sales_order_id || "",
+    related_pick_task_id: input.related_pick_task_id || "",
+    related_amazon_order_id: input.related_amazon_order_id || "",
+    scan_code: input.scan_code || canonicalLot.qr_value || canonicalLot.internal_lot_id,
+    device_id: input.device_id || "WEB_APP",
+    approval_status: input.approval_status || "APPROVED",
+    notes: input.notes || ""
+  };
+
   appendRecord_("INVENTORY_MOVEMENTS", movement);
+  updateSalesProgressFromMovement_(movement, Math.abs(qtyChange));
   return movement;
 }
 
@@ -576,26 +789,62 @@ function salesOrderAction(payload) {
   const orderId = text_((payload || {}).salesOrderId || (payload || {}).sales_order_id);
   const action = upper_((payload || {}).action || (payload || {}).status);
   require_(user, "salesOrders:actions");
+
+  if (!orderId) throw new Error("Sales Order ID is required.");
+
   if (action === "CONFIRM" || action === "CONFIRMED") {
     const detail = getSalesOrderDetail({ sales_order_id: orderId });
-    detail.lines.forEach(line => appendRecord_("PICK_TASKS", { pick_task_id: nextId_("PICK_TASKS", "pick_task_id", "PICK"), sales_order_id: orderId, sales_order_line_id: line.sales_order_line_id, channel: line.channel, task_date: today_(), priority: "NORMAL", product_id: line.product_id, recommended_internal_lot_id: line.preferred_internal_lot_id, recommended_location_id: line.preferred_location_id, qty_to_pick: line.qty_ordered, qty_picked: 0, unit_type: line.unit_type, assigned_to: "", pick_status: "OPEN", scan_code: line.preferred_internal_lot_id, device_id: "WEB_APP", exception_code: "", notes: "", qty_to_pick_base: line.inventory_qty_required || line.qty_ordered, reservation_status: "RESERVED" }));
+    if (!detail) throw new Error("Sales Order was not found.");
+
+    const existingTasks = readTable_("PICK_TASKS").filter(task => String(task.sales_order_id) === orderId);
+    if (!existingTasks.length) {
+      detail.lines.forEach(line => appendRecord_("PICK_TASKS", {
+        pick_task_id: nextId_("PICK_TASKS", "pick_task_id", "PICK"),
+        sales_order_id: orderId,
+        sales_order_line_id: line.sales_order_line_id,
+        channel: line.channel,
+        task_date: today_(),
+        priority: "NORMAL",
+        product_id: line.product_id,
+        recommended_internal_lot_id: line.preferred_internal_lot_id,
+        recommended_location_id: line.preferred_location_id,
+        qty_to_pick: line.qty_ordered,
+        qty_picked: 0,
+        unit_type: line.unit_type,
+        assigned_to: "",
+        pick_status: "OPEN",
+        scan_code: line.preferred_internal_lot_id,
+        device_id: "WEB_APP",
+        exception_code: "",
+        notes: "",
+        qty_to_pick_base: line.inventory_qty_required || line.qty_ordered,
+        reservation_status: "RESERVED"
+      }));
+    }
+
     updateRecord_("SALES_ORDERS", "sales_order_id", orderId, { status: "CONFIRMED", confirmed_at: now_(), updated_at: now_() });
   } else if (action === "PICK" || action === "PICKED") {
-    readTable_("PICK_TASKS").filter(task => String(task.sales_order_id) === orderId).forEach(task => updateRecord_("PICK_TASKS", "pick_task_id", task.pick_task_id, { qty_picked: task.qty_to_pick, pick_status: "PICKED", picked_at: now_(), reservation_status: "PICKED" }));
-    readTable_("SALES_ORDER_LINES").filter(line => String(line.sales_order_id) === orderId).forEach(line => updateRecord_("SALES_ORDER_LINES", "sales_order_line_id", line.sales_order_line_id, { qty_picked: line.qty_ordered, qty_remaining: 0, line_status: "PICKED" }));
-    updateRecord_("SALES_ORDERS", "sales_order_id", orderId, { status: "PICKED", picked_at: now_(), updated_at: now_() });
+    throw new Error("Use Send Product to scan physical inventory. Sales Orders no longer auto-pick or deduct inventory.");
   } else if (action === "SHIP" || action === "SHIPPED") {
     const detail = getSalesOrderDetail({ sales_order_id: orderId });
-    detail.pickTasks.forEach(task => {
-      appendRecord_("INVENTORY_MOVEMENTS", { movement_id: nextId_("INVENTORY_MOVEMENTS", "movement_id", "MOV"), movement_type: "SALE", timestamp: now_(), user_id: user.user_id || user.role || "", product_id: task.product_id, internal_lot_id: task.recommended_internal_lot_id, qty_change: -Math.abs(n_(task.qty_to_pick_base || task.qty_to_pick, 0)), unit_type: task.unit_type, from_location_id: task.recommended_location_id, to_location_id: "CUSTOMER", related_sales_order_id: orderId, related_pick_task_id: task.pick_task_id, scan_code: task.scan_code, device_id: task.device_id || "WEB_APP", approval_status: "APPROVED", notes: "Shipped sales order." });
-      updateRecord_("PICK_TASKS", "pick_task_id", task.pick_task_id, { pick_status: "SHIPPED", reservation_status: "RELEASED" });
-    });
+    if (!detail) throw new Error("Sales Order was not found.");
+
+    const allPicked = detail.lines.length > 0 && detail.lines.every(line =>
+      n_(line.qty_remaining, 0) <= 0.0001 || upper_(line.line_status) === "PICKED"
+    );
+    if (!allPicked) throw new Error("Use Send Product to scan/pick all Sales Order lines before shipping.");
+
+    detail.pickTasks.forEach(task => updateRecord_("PICK_TASKS", "pick_task_id", task.pick_task_id, {
+      pick_status: "SHIPPED",
+      reservation_status: "RELEASED"
+    }));
     updateRecord_("SALES_ORDERS", "sales_order_id", orderId, { status: "SHIPPED", shipped_at: now_(), updated_at: now_() });
   } else if (action === "CANCEL" || action === "CANCELLED") {
     updateRecord_("SALES_ORDERS", "sales_order_id", orderId, { status: "CANCELLED", updated_at: now_() });
   } else {
     updateRecord_("SALES_ORDERS", "sales_order_id", orderId, { status: action, updated_at: now_() });
   }
+
   return getSalesOrderDetail({ sales_order_id: orderId });
 }
 
