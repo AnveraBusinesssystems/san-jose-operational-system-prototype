@@ -4,22 +4,30 @@ import {
   listSalesOrders,
   lookupScan,
   recordInventoryMovement
-} from "../js/api-smooth1.js?v=send1";
-import { handleKeyboardScan, startCameraScanner, stopCameraScanner } from "../js/scanner.js?v=send1";
-import { escapeHtml, formatQuantity, notice } from "../js/utils.js?v=send1";
+} from "../js/api-smooth1.js?v=send2";
+import { handleKeyboardScan, startCameraScanner, stopCameraScanner } from "../js/scanner.js?v=send2";
+import { escapeHtml, formatQuantity, notice } from "../js/utils.js?v=send2";
 
 let activeDetail = null;
 let activeInventoryRows = [];
 let selectedLot = null;
 let selectedLineId = "";
+let activeMode = "SO";
+
+const MODE_LABELS = {
+  SO: "Sales Order",
+  AMAZON: "Amazon",
+  QUICK: "Quick Sale"
+};
 
 export async function render(ctx) {
-  ctx.setTitle("Send Product", "Scan physical inventory before deducting Sales Order or Amazon outbound stock");
+  ctx.setTitle("Send Product", "One outbound screen for Sales Orders, Amazon, and quick/manual customer sends");
   const [orders, inventoryRows] = await Promise.all([listSalesOrders(), inventorySnapshot()]);
   activeInventoryRows = inventoryRows;
   activeDetail = null;
   selectedLot = null;
   selectedLineId = "";
+  activeMode = routeId() ? "SO" : "SO";
   const routeSalesOrderId = routeId();
   const openOrders = orders.filter((order) => !["SHIPPED", "CANCELLED", "CLOSED"].includes(String(order.status || "").toUpperCase()));
 
@@ -28,51 +36,85 @@ export async function render(ctx) {
       <section class="panel receiving-scan-panel">
         <div class="panel-header">
           <div>
-            <h2>Scan Product Leaving Warehouse</h2>
-            <p class="muted">Sales Orders and Amazon do not deduct inventory until this scan-and-send step is completed.</p>
+            <h2>Send Product</h2>
+            <p class="muted">If product leaves the warehouse, use this screen. Pick a mode, scan the physical lot QR, then confirm the quantity sent.</p>
           </div>
           <button id="scanSendQr" class="btn" type="button">Scan QR</button>
         </div>
+
+        <div class="receiving-lines-header">
+          <span>Outbound Type</span>
+          <small>Sales Order = guided pick. Amazon = order/reference. Quick Sale = fast customer/manual send.</small>
+        </div>
+        <div class="sales-order-header-grid outbound-mode-grid">
+          <button class="btn outbound-mode-btn" type="button" data-mode="SO">Sales Order</button>
+          <button class="btn btn-secondary outbound-mode-btn" type="button" data-mode="AMAZON">Amazon</button>
+          <button class="btn btn-secondary outbound-mode-btn" type="button" data-mode="QUICK">Quick Sale</button>
+        </div>
+
         <div class="receiving-scan-row">
           <div class="field">
             <label>Lot / Pallet / Box QR</label>
             <input id="sendScan" autocomplete="off" placeholder="Scan or paste physical inventory QR">
           </div>
-          <div class="field">
+          <div class="field mode-field mode-so-field">
             <label>Sales Order</label>
             <select id="salesOrderSelect">
-              <option value="">Amazon / manual outbound, or choose Sales Order</option>
+              <option value="">Choose Sales Order</option>
               ${openOrders.map((order) => `<option value="${escapeHtml(order.sales_order_id)}" ${order.sales_order_id === routeSalesOrderId ? "selected" : ""}>${escapeHtml(order.sales_order_id)} - ${escapeHtml(order.customer?.supplier_name || order.customer_name || order.customer_id || "Customer")} (${escapeHtml(order.status || "DRAFT")})</option>`).join("")}
             </select>
           </div>
         </div>
+
+        <div class="sales-order-header-grid mode-field mode-amazon-field" hidden>
+          <div class="field">
+            <label>Amazon Order / FBA Reference</label>
+            <input name="amazon_reference" form="sendProductForm" autocomplete="off" placeholder="Amazon order, FBA shipment, or package ref">
+          </div>
+          <div class="field">
+            <label>Amazon SKU / Item ID</label>
+            <input name="amazon_item_reference" form="sendProductForm" autocomplete="off" placeholder="Optional SKU or order item">
+          </div>
+        </div>
+
+        <div class="sales-order-header-grid mode-field mode-quick-field" hidden>
+          <div class="field">
+            <label>Customer / Person Name</label>
+            <input name="quick_customer_name" form="sendProductForm" autocomplete="off" placeholder="Who is taking this product?">
+          </div>
+          <div class="field">
+            <label>Phone / Contact</label>
+            <input name="quick_customer_contact" form="sendProductForm" autocomplete="off" placeholder="Optional phone, email, or company">
+          </div>
+          <div class="field">
+            <label>Quick Reference</label>
+            <input name="quick_reference" form="sendProductForm" autocomplete="off" placeholder="Optional invoice, cash sale, sample, or note">
+          </div>
+          <div class="field">
+            <label>Unit Price</label>
+            <input name="quick_unit_price" form="sendProductForm" type="number" min="0" step="0.01" placeholder="Optional">
+          </div>
+        </div>
+
         <div id="cameraReader"></div>
-        <div id="sendScanResult" class="result">Scan a lot QR, then send product against a Sales Order or Amazon reference.</div>
+        <div id="sendScanResult" class="result">Choose an outbound type, then scan the exact lot/pallet/box that is leaving.</div>
       </section>
 
       <section class="panel receiving-workspace">
         <div class="panel-header receiving-order-header">
           <div>
             <h2 id="sendOrderTitle">Outbound Product</h2>
-            <p id="sendOrderMeta" class="muted">Choose a Sales Order for guided picking, or use Amazon/manual reference.</p>
+            <p id="sendOrderMeta" class="muted">Choose Sales Order, Amazon, or Quick Sale.</p>
           </div>
           <span id="sendOrderStatus" class="status">WAITING</span>
         </div>
 
         <form id="sendProductForm">
+          <input type="hidden" name="movement_type" value="SALE">
           <div class="sales-order-header-grid">
             <div class="field">
-              <label>Outbound Type</label>
-              <select name="movement_type">
-                <option value="SALE">Sales Order / Wholesale</option>
-                <option value="AMAZON_OUT">Amazon Outbound</option>
-                <option value="USE">Internal Use</option>
-                <option value="ADJUST_OUT">Adjustment Out</option>
-              </select>
-            </div>
-            <div class="field">
-              <label>Amazon / External Reference</label>
-              <input name="related_amazon_order_id" autocomplete="off" placeholder="Amazon order, FBA, or manual ref">
+              <label>Outbound Mode</label>
+              <input id="activeOutboundMode" readonly value="Sales Order">
             </div>
             <div class="field">
               <label>Scanned Lot</label>
@@ -81,6 +123,10 @@ export async function render(ctx) {
             <div class="field">
               <label>Location</label>
               <input name="location_id" readonly placeholder="Auto from inventory">
+            </div>
+            <div class="field">
+              <label>Inventory Action</label>
+              <input id="inventoryActionPreview" readonly value="SALE">
             </div>
           </div>
 
@@ -101,7 +147,7 @@ export async function render(ctx) {
               <div><span>Lot</span><strong id="sendLotId">—</strong></div>
               <div><span>Available</span><strong id="sendAvailableQty">—</strong></div>
               <div><span>Location</span><strong id="sendLocationId">—</strong></div>
-              <div><span>Sales Order Need</span><strong id="sendOrderNeed">Choose SO line</strong></div>
+              <div><span>Order Need</span><strong id="sendOrderNeed">Depends on mode</strong></div>
               <div><span>Inventory Unit</span><strong id="sendInventoryUnit">LB</strong></div>
             </div>
             <div class="receiving-entry-grid">
@@ -115,7 +161,7 @@ export async function render(ctx) {
               </div>
               <div class="field full">
                 <label>Notes</label>
-                <textarea name="notes" placeholder="Optional: partial pick, damaged, substitution approval, Amazon reference"></textarea>
+                <textarea name="notes" placeholder="Optional: partial pick, Amazon reference, quick sale note, substitution approval"></textarea>
               </div>
             </div>
             <div id="sendValidation" class="receiving-quantity-preview"></div>
@@ -129,23 +175,76 @@ export async function render(ctx) {
     </div>
   `;
 
-  document.getElementById("salesOrderSelect").addEventListener("change", (event) => loadSalesOrder(event.target.value).catch((error) => notice(error.message)));
+  document.querySelectorAll(".outbound-mode-btn").forEach((button) => {
+    button.addEventListener("click", () => setOutboundMode(button.dataset.mode));
+  });
+  document.getElementById("salesOrderSelect").addEventListener("change", (event) => {
+    setOutboundMode("SO", { keepSelection: true });
+    loadSalesOrder(event.target.value).catch((error) => notice(error.message));
+  });
   handleKeyboardScan(document.getElementById("sendScan"), (value) => handleSendScan(value).catch((error) => notice(error.message)));
   document.getElementById("scanSendQr").addEventListener("click", startSendCamera);
   document.getElementById("sendProductForm").addEventListener("change", handleFormChange);
   document.getElementById("sendProductForm").addEventListener("input", updateSendValidation);
   document.getElementById("sendProductForm").addEventListener("submit", (event) => submitSendProduct(event, ctx));
 
+  setOutboundMode(routeSalesOrderId ? "SO" : "SO", { keepSelection: true });
   if (routeSalesOrderId) await loadSalesOrder(routeSalesOrderId);
+}
+
+function setOutboundMode(mode, options = {}) {
+  activeMode = ["SO", "AMAZON", "QUICK"].includes(mode) ? mode : "SO";
+  const form = document.getElementById("sendProductForm");
+  if (!form) return;
+  const movementType = activeMode === "AMAZON" ? "AMAZON_OUT" : "SALE";
+  form.elements.movement_type.value = movementType;
+  document.getElementById("inventoryActionPreview").value = movementType;
+  document.getElementById("activeOutboundMode").value = MODE_LABELS[activeMode];
+
+  document.querySelectorAll(".outbound-mode-btn").forEach((button) => {
+    const isActive = button.dataset.mode === activeMode;
+    button.classList.toggle("btn-secondary", !isActive);
+  });
+
+  document.querySelectorAll(".mode-field").forEach((section) => {
+    section.hidden = true;
+  });
+  document.querySelectorAll(`.mode-${activeMode.toLowerCase()}-field`).forEach((section) => {
+    section.hidden = false;
+  });
+
+  if (activeMode !== "SO") {
+    activeDetail = null;
+    selectedLineId = "";
+    if (!options.keepSelection && document.getElementById("salesOrderSelect")) document.getElementById("salesOrderSelect").value = "";
+    document.getElementById("sendLines").innerHTML = activeMode === "AMAZON"
+      ? `<div class="empty">Amazon mode records the Amazon/FBA reference and deducts the scanned inventory.</div>`
+      : `<div class="empty">Quick Sale mode records the customer/person in the movement notes and deducts the scanned inventory.</div>`;
+    document.getElementById("sendOrderTitle").textContent = MODE_LABELS[activeMode];
+    document.getElementById("sendOrderMeta").textContent = activeMode === "AMAZON"
+      ? "Enter Amazon order/FBA/package reference, scan the lot, and send."
+      : "Enter customer/person details, scan the lot, and send without creating a full Sales Order first.";
+    document.getElementById("sendOrderStatus").textContent = activeMode;
+    document.getElementById("sendOrderNeed").textContent = activeMode === "AMAZON" ? "Amazon reference" : "Quick customer send";
+  } else if (!activeDetail) {
+    document.getElementById("sendLines").innerHTML = `<div class="empty">Sales Order pick lines will appear here.</div>`;
+    document.getElementById("sendOrderTitle").textContent = "Sales Order Pick";
+    document.getElementById("sendOrderMeta").textContent = "Choose a Sales Order for guided picking.";
+    document.getElementById("sendOrderStatus").textContent = "WAITING";
+    document.getElementById("sendOrderNeed").textContent = "Choose SO line";
+  }
+
+  updateSendValidation();
 }
 
 async function loadSalesOrder(salesOrderId) {
   activeDetail = null;
   selectedLineId = "";
   selectedLot = null;
+  setOutboundMode("SO", { keepSelection: true });
   document.getElementById("sendLines").innerHTML = `<div class="empty">Sales Order pick lines will appear here.</div>`;
-  document.getElementById("sendOrderTitle").textContent = "Outbound Product";
-  document.getElementById("sendOrderMeta").textContent = "Choose a Sales Order for guided picking, or use Amazon/manual reference.";
+  document.getElementById("sendOrderTitle").textContent = "Sales Order Pick";
+  document.getElementById("sendOrderMeta").textContent = "Choose a Sales Order for guided picking.";
   document.getElementById("sendOrderStatus").textContent = "WAITING";
   if (!salesOrderId) {
     updateSendValidation();
@@ -205,15 +304,17 @@ async function handleSendScan(value) {
   document.getElementById("sendLocationId").textContent = form.elements.location_id.value || "—";
   document.getElementById("sendInventoryUnit").textContent = form.elements.unit_type.value || "LB";
 
-  const matchingLine = activeDetail?.lines?.find((line) => String(line.product_id) === String(selectedLot.product_id) && String(line.preferred_internal_lot_id) === String(selectedLot.internal_lot_id));
+  const matchingLine = activeMode === "SO" ? activeDetail?.lines?.find((line) => String(line.product_id) === String(selectedLot.product_id) && String(line.preferred_internal_lot_id) === String(selectedLot.internal_lot_id)) : null;
   if (matchingLine) {
     selectedLineId = matchingLine.sales_order_line_id;
     form.elements.qty.value = formatNumber(matchingLine.inventory_qty_required || matchingLine.qty_ordered || 0);
     form.elements.unit_type.value = matchingLine.inventory_unit_type || form.elements.unit_type.value || "LB";
     document.getElementById("sendOrderNeed").textContent = `${formatNumber(matchingLine.inventory_qty_required || 0)} ${matchingLine.inventory_unit_type || "LB"}`;
+  } else if (activeMode !== "SO") {
+    document.getElementById("sendOrderNeed").textContent = activeMode === "AMAZON" ? "Amazon reference" : "Quick customer send";
   }
 
-  renderSalesOrderLines();
+  if (activeMode === "SO") renderSalesOrderLines();
   document.getElementById("sendScanResult").innerHTML = `<strong>${escapeHtml(match.type)}</strong><pre>${escapeHtml(JSON.stringify(match.record, null, 2))}</pre>`;
   updateSendValidation();
 }
@@ -251,26 +352,53 @@ async function submitSendProduct(event, ctx) {
   const qty = Number(form.elements.qty.value || 0);
   if (qty <= 0) return notice("Quantity to send must be greater than zero.");
   const line = selectedLineId ? activeDetail?.lines?.find((item) => item.sales_order_line_id === selectedLineId) : null;
-  if (activeDetail && !line) return notice("Select the Sales Order line this scanned product is fulfilling.");
-  if (line && selectedLot) {
-    if (String(line.product_id) !== String(selectedLot.product_id)) return notice("Scanned product does not match the selected Sales Order line.");
-    if (String(line.preferred_internal_lot_id) !== String(selectedLot.internal_lot_id)) return notice("Scanned lot does not match the recommended Sales Order lot. Add a manager-approved exception before sending a substitute.");
+
+  if (activeMode === "SO") {
+    if (!activeDetail) return notice("Choose a Sales Order first.");
+    if (!line) return notice("Select the Sales Order line this scanned product is fulfilling.");
+    if (line && selectedLot) {
+      if (String(line.product_id) !== String(selectedLot.product_id)) return notice("Scanned product does not match the selected Sales Order line.");
+      if (String(line.preferred_internal_lot_id) !== String(selectedLot.internal_lot_id)) return notice("Scanned lot does not match the recommended Sales Order lot. Add a manager-approved exception before sending a substitute.");
+    }
   }
+
+  const amazonReference = String(form.elements.amazon_reference?.value || "").trim();
+  const amazonItemReference = String(form.elements.amazon_item_reference?.value || "").trim();
+  const quickCustomerName = String(form.elements.quick_customer_name?.value || "").trim();
+  const quickCustomerContact = String(form.elements.quick_customer_contact?.value || "").trim();
+  const quickReference = String(form.elements.quick_reference?.value || "").trim();
+  const quickUnitPrice = String(form.elements.quick_unit_price?.value || "").trim();
+
+  if (activeMode === "AMAZON" && !amazonReference) return notice("Enter the Amazon order, FBA, or package reference.");
+  if (activeMode === "QUICK" && !quickCustomerName) return notice("Enter the customer/person name for the quick sale.");
+
   try {
-    const movementType = form.elements.movement_type.value;
+    const movementType = activeMode === "AMAZON" ? "AMAZON_OUT" : "SALE";
+    const notes = [
+      `Outbound mode: ${MODE_LABELS[activeMode]}`,
+      line ? `SO line ${line.sales_order_line_id}` : "",
+      activeMode === "AMAZON" ? `Amazon reference: ${amazonReference}` : "",
+      activeMode === "AMAZON" && amazonItemReference ? `Amazon item/SKU: ${amazonItemReference}` : "",
+      activeMode === "QUICK" ? `Quick customer: ${quickCustomerName}` : "",
+      activeMode === "QUICK" && quickCustomerContact ? `Contact: ${quickCustomerContact}` : "",
+      activeMode === "QUICK" && quickReference ? `Quick reference: ${quickReference}` : "",
+      activeMode === "QUICK" && quickUnitPrice ? `Unit price: ${quickUnitPrice}` : "",
+      form.elements.notes.value.trim()
+    ].filter(Boolean).join(" | ");
     const input = {
       internal_lot_id: form.elements.internal_lot_id.value,
       qty,
       unit_type: form.elements.unit_type.value || "LB",
       movement_type: movementType,
       location_id: form.elements.location_id.value,
-      related_sales_order_id: activeDetail?.order?.sales_order_id || "",
-      related_pick_task_id: relatedPickTaskId(line),
-      related_amazon_order_id: form.elements.related_amazon_order_id.value.trim(),
-      notes: [line ? `SO line ${line.sales_order_line_id}` : "", form.elements.notes.value.trim()].filter(Boolean).join(" | ")
+      related_sales_order_id: activeMode === "SO" ? activeDetail?.order?.sales_order_id || "" : "",
+      related_pick_task_id: activeMode === "SO" ? relatedPickTaskId(line) : "",
+      related_amazon_order_id: activeMode === "AMAZON" ? amazonReference : "",
+      package_id: activeMode === "AMAZON" ? amazonItemReference : "",
+      notes
     };
     const movement = await recordInventoryMovement(ctx.user, input);
-    notice(`Sent product and deducted inventory movement ${movement.movement_id}.`);
+    notice(`Sent product through ${MODE_LABELS[activeMode]} and deducted inventory movement ${movement.movement_id}.`);
     await render(ctx);
   } catch (error) {
     notice(error.message);
@@ -285,13 +413,18 @@ function updateSendValidation() {
   const snapshotRow = selectedLot ? findInventoryRow(selectedLot.internal_lot_id) : null;
   const qty = Number(form.elements.qty.value || 0);
   const available = Number(snapshotRow?.available_qty ?? snapshotRow?.current_qty ?? 0);
+  const movementType = activeMode === "AMAZON" ? "AMAZON_OUT" : "SALE";
+  const matchText = activeMode === "SO"
+    ? line && selectedLot ? lineMatchesLot(line, selectedLot) ? "OK" : "MISMATCH" : "Choose SO line"
+    : activeMode === "AMAZON" ? "Amazon outbound" : "Quick/manual send";
   const messages = [];
-  messages.push(`<div><span>Inventory Action</span><strong>${escapeHtml(form.elements.movement_type.value || "SALE")}</strong></div>`);
+  messages.push(`<div><span>Outbound Mode</span><strong>${escapeHtml(MODE_LABELS[activeMode])}</strong></div>`);
+  messages.push(`<div><span>Inventory Action</span><strong>${escapeHtml(movementType)}</strong></div>`);
   messages.push(`<div><span>Available Before Send</span><strong>${snapshotRow ? `${formatNumber(available)} ${escapeHtml(snapshotRow.unit_type || "LB")}` : "Scan inventory"}</strong></div>`);
   messages.push(`<div><span>Quantity Entered</span><strong>${formatNumber(qty)} ${escapeHtml(form.elements.unit_type.value || "LB")}</strong></div>`);
-  messages.push(`<div><span>Match</span><strong>${line && selectedLot ? lineMatchesLot(line, selectedLot) ? "OK" : "MISMATCH" : activeDetail ? "Choose SO line" : "Manual/Amazon"}</strong></div>`);
+  messages.push(`<div><span>Match</span><strong>${escapeHtml(matchText)}</strong></div>`);
   target.innerHTML = messages.join("");
-  document.getElementById("sendMatchStatus").hidden = !(line && selectedLot && lineMatchesLot(line, selectedLot));
+  document.getElementById("sendMatchStatus").hidden = !(activeMode === "SO" && line && selectedLot && lineMatchesLot(line, selectedLot));
 }
 
 function lineMatchesLot(line, lot) {
