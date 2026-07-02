@@ -1,4 +1,4 @@
-import { allowedPages } from "../js/permissions.js?v=mobilehome1";
+import { allowedPages } from "../js/permissions.js?v=send1";
 import { navigate } from "../js/router.js?v=mobilehome1";
 
 const GROUPS = [
@@ -17,7 +17,8 @@ const GROUPS = [
     icon: "orders",
     pages: [
       ["purchaseOrders", "Purchase Orders"],
-      ["salesOrders", "Sales Orders"]
+      ["salesOrders", "Sales Orders"],
+      ["sendProduct", "Send Product"]
     ]
   },
   {
@@ -43,7 +44,7 @@ const GROUPS = [
     id: "shipping",
     label: "Shipping",
     icon: "shipping",
-    pages: [["amazon", "Amazon Outbound"]]
+    pages: [["amazon", "Amazon Outbound"], ["sendProduct", "Send Product"]]
   },
   {
     id: "people",
