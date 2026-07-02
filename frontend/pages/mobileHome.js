@@ -1,4 +1,4 @@
-import { allowedPages } from "../js/permissions.js?v=send2";
+import { allowedPages } from "../js/permissions.js?v=send-ui1";
 import { navigate } from "../js/router.js?v=send2";
 
 const GROUPS = [
@@ -44,8 +44,7 @@ const GROUPS = [
     label: "Shipping",
     icon: "shipping",
     pages: [
-      ["sendProduct", "Send Product"],
-      ["amazon", "Amazon Outbound"]
+      ["sendProduct", "Send Product"]
     ]
   },
   {
@@ -92,59 +91,52 @@ export async function render(ctx) {
   ctx.view.querySelectorAll("[data-home-group]").forEach((button) => {
     button.addEventListener("click", () => {
       const group = groups.find((item) => item.id === button.dataset.homeGroup);
-      ctx.view.querySelectorAll("[data-home-group]").forEach((tile) => {
-        const active = tile === button && tile.getAttribute("aria-expanded") !== "true";
-        tile.classList.toggle("active", active);
-        tile.setAttribute("aria-expanded", String(active));
-      });
-
-      if (!button.classList.contains("active")) {
-        panel.hidden = true;
-        panel.innerHTML = "";
-        return;
-      }
-
+      ctx.view.querySelectorAll("[data-home-group]").forEach((item) => item.setAttribute("aria-expanded", "false"));
+      button.setAttribute("aria-expanded", "true");
       panel.hidden = false;
       panel.innerHTML = `
         <div class="warehouse-action-heading">
           <span>${group.label}</span>
-          <button type="button" data-close-home-actions aria-label="Close ${group.label}">&times;</button>
+          <small>Choose an action</small>
         </div>
         <div class="warehouse-action-list">
-          ${group.pages.map(([id, label]) => `<button type="button" data-home-route="${id}"><span>${label}</span><b aria-hidden="true">&#8594;</b></button>`).join("")}
+          ${group.pages.map(([id, label]) => `<button type="button" data-home-route="${id}">${label}</button>`).join("")}
         </div>
       `;
-      panel.querySelector("[data-close-home-actions]").addEventListener("click", () => button.click());
-      panel.querySelectorAll("[data-home-route]").forEach((action) => {
-        action.addEventListener("click", () => navigate(action.dataset.homeRoute));
-      });
       panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
     });
   });
 
-  ctx.view.querySelector("[data-home-sign-out]").addEventListener("click", () => {
-    document.getElementById("signOutButton").click();
+  panel.addEventListener("click", (event) => {
+    const route = event.target.closest("[data-home-route]")?.dataset.homeRoute;
+    if (route) navigate(route);
+  });
+  ctx.view.querySelector("[data-home-sign-out]")?.addEventListener("click", () => {
+    document.getElementById("signOutButton")?.click();
   });
 }
 
-function firstName(value) {
-  return String(value || "Team member").trim().split(/\s+/)[0];
+function firstName(name) {
+  return String(name || "Team").trim().split(/\s+/)[0] || "Team";
 }
 
 function escapeHtml(value) {
-  return String(value || "").replace(/[&<>'"]/g, (character) => ({
-    "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;"
-  })[character]);
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 }
 
 function icon(name) {
   const paths = {
-    overview: '<path d="M3 12a9 9 0 1 0 18 0 9 9 0 0 0-18 0"></path><path d="M12 12 16 8"></path><path d="M7.5 16.5h9"></path>',
-    orders: '<path d="M9 5h6"></path><path d="M9 3h6v4H9z"></path><path d="M7 5H5v16h14V5h-2"></path><path d="M8 12h8M8 16h6"></path>',
-    receiving: '<path d="M4 9 12 4l8 5-8 5-8-5Z"></path><path d="M4 9v6l8 5 8-5V9"></path><path d="M12 8v8"></path><path d="m9 13 3 3 3-3"></path>',
-    inventory: '<path d="M3 21V8l9-5 9 5v13"></path><path d="M7 21v-8h10v8"></path><path d="M7 17h10M12 13v8"></path>',
-    shipping: '<path d="M3 6h11v11H3z"></path><path d="M14 10h4l3 3v4h-7z"></path><circle cx="7" cy="19" r="2"></circle><circle cx="18" cy="19" r="2"></circle>',
-    people: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"></path>'
+    overview: '<path d="M4 13h6V4H4z"></path><path d="M14 20h6V4h-6z"></path><path d="M4 20h6v-3H4z"></path>',
+    orders: '<path d="M6 3h12l2 4v14H4V7z"></path><path d="M6 7h12"></path><path d="M9 11h6"></path>',
+    receiving: '<path d="M12 3v12"></path><path d="m7 10 5 5 5-5"></path><path d="M4 19h16"></path>',
+    inventory: '<path d="M4 6h16v13H4z"></path><path d="M4 10h16"></path><path d="M9 6v13"></path>',
+    shipping: '<path d="M3 7h11v9H3z"></path><path d="M14 10h4l3 3v3h-7z"></path><circle cx="7" cy="18" r="2"></circle><circle cx="17" cy="18" r="2"></circle>',
+    people: '<path d="M16 11a4 4 0 1 0-8 0"></path><path d="M4 21a8 8 0 0 1 16 0"></path>'
   };
   return `<svg aria-hidden="true" viewBox="0 0 24 24">${paths[name]}</svg>`;
 }
