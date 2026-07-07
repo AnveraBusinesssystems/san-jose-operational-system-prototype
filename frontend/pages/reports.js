@@ -5,8 +5,8 @@ const REPORT_BLOCKS = [
   {
     id: "planning",
     title: "Inventory Planning",
-    subtitle: "Reorder point, target stock, and suggested order quantity.",
-    metric: "Products needing attention"
+    subtitle: "Current LB, inventory value, and planning readiness.",
+    metric: "Products reviewed"
   },
   {
     id: "suppliers",
@@ -17,7 +17,7 @@ const REPORT_BLOCKS = [
   {
     id: "recommendations",
     title: "Recommendations",
-    subtitle: "Simple reorder actions based on current stock.",
+    subtitle: "Reorder actions only after enough movement history exists.",
     metric: "Suggested actions"
   },
   {
@@ -46,10 +46,10 @@ export async function render(ctx) {
         </div>
 
         <div class="formula-strip" aria-label="Inventory planning formula summary">
-          <div><span>Current Qty</span><strong>Active lots on hand</strong></div>
-          <div><span>Avg Usage</span><strong>90-day shipped sales ÷ 90</strong></div>
-          <div><span>Reorder Point</span><strong>Lead-time demand + safety stock</strong></div>
-          <div><span>Recommended Qty</span><strong>Target stock − current qty</strong></div>
+          <div><span>Current LB</span><strong>Sum of active lots on hand</strong></div>
+          <div><span>Inventory Value</span><strong>LB × calculated cost per LB</strong></div>
+          <div><span>Cost Rule</span><strong>Case cost ÷ LB per case</strong></div>
+          <div><span>Planning</span><strong>Locked until real usage history exists</strong></div>
         </div>
 
         <div class="report-summary-grid">
@@ -64,6 +64,7 @@ export async function render(ctx) {
   const showReport = (id) => {
     detail.innerHTML = reportDetail(id, reports);
     enableTableFilters(detail);
+    enableProductAnalytics(detail, reports);
     document.querySelectorAll("[data-report-block]").forEach((button) => {
       button.classList.toggle("selected", button.dataset.reportBlock === id);
     });
@@ -76,16 +77,20 @@ export async function render(ctx) {
 }
 
 function chooseInitialReport(reports) {
-  if (reports.inventoryPlanning.length || reports.recommendations.length) return "planning";
-  if (reports.supplierAnalytics.length) return "suppliers";
+  if ((reports.inventoryPlanning || []).length || (reports.recommendations || []).length) return "planning";
+  if ((reports.supplierAnalytics || []).length) return "suppliers";
   return "snapshot";
 }
 
 function healthSummary(reports) {
-  const reorder = countStatus(reports.inventoryPlanning, "REORDER");
-  const watch = countStatus(reports.inventoryPlanning, "WATCH");
+  const valueRows = reports.inventoryValueByProduct || [];
+  const inventoryValue = valueRows.reduce((sum, row) => sum + Number(row.total_inventory_value || row.inventory_value || 0), 0);
+  const notReady = countStatus(reports.inventoryPlanning || [], "NOT_READY");
+  const reorder = countStatus(reports.inventoryPlanning || [], "REORDER");
+  const watch = countStatus(reports.inventoryPlanning || [], "WATCH");
   if (reorder) return `${reorder} reorder alert${reorder === 1 ? "" : "s"}`;
   if (watch) return `${watch} watch item${watch === 1 ? "" : "s"}`;
+  if (inventoryValue) return `${money(inventoryValue)} inventory value · ${notReady} planning not ready`;
   return "No reorder alerts";
 }
 
@@ -102,10 +107,10 @@ function reportBlockButton(block, reports) {
 }
 
 function reportCount(id, reports) {
-  if (id === "planning") return reports.inventoryPlanning.length;
-  if (id === "suppliers") return reports.supplierAnalytics.length;
-  if (id === "recommendations") return reports.recommendations.length;
-  return reports.inventorySnapshot.length;
+  if (id === "planning") return (reports.inventoryPlanning || []).length;
+  if (id === "suppliers") return (reports.supplierAnalytics || []).length;
+  if (id === "recommendations") return (reports.recommendations || []).length;
+  return (reports.inventorySnapshot || []).length;
 }
 
 function reportDetail(id, reports) {
@@ -117,25 +122,32 @@ function reportDetail(id, reports) {
 
 function inventoryPlanning(reports) {
   const rows = reports.inventoryPlanning || [];
+  const totalLb = rows.reduce((sum, row) => sum + Number(row.current_qty || row.total_qty_lb || 0), 0);
+  const totalValue = rows.reduce((sum, row) => sum + Number(row.total_inventory_value || row.inventory_value || 0), 0);
   return `
     <div class="panel-header report-detail-heading">
       <div>
         <h2>Inventory Planning Metrics</h2>
-        <p class="muted">Shows products with reorder/watch rules, supplier timing, or calculated usage.</p>
+        <p class="muted">Current inventory value shows now. Reorder math stays blank until real sales/pick history exists.</p>
       </div>
       <div class="actions">
-        <span class="status warn">Reorder ${countStatus(rows, "REORDER")}</span>
-        <span class="status">Watch ${countStatus(rows, "WATCH")}</span>
+        <span class="status ok">${quantity(totalLb)} LB</span>
+        <span class="status ok">${money(totalValue)}</span>
       </div>
     </div>
     <div class="formula-note">
       <strong>How this works:</strong>
-      Current Qty comes from active lots. Avg Daily Usage is shipped sales from the last 90 days divided by 90. Reorder Point is estimated lead-time demand plus safety stock. Recommended Qty is target stock minus current stock.
+      Opening Inventory cost is treated as cost per purchase unit/case. The backend converts it to cost per LB before calculating inventory value. Avg Daily Usage, Avg Lead, Demand During Lead, Safety Stock, Reorder Point, Target Stock, and Recommended Qty are intentionally blank until the product has real outbound movement history.
     </div>
+    <div id="productAnalyticsPanel" class="product-analytics-panel" hidden></div>
     ${rows.length ? table([
-      { label: "Product", render: (row) => `${escapeHtml(row.product_name)}<br><small>${escapeHtml(row.product_id)}</small>` },
-      { label: "Supplier", render: (row) => escapeHtml(row.supplier_name || row.supplier_id || "No supplier history") },
-      { label: "Current", render: (row) => quantity(row.current_qty) },
+      { label: "Product", render: productWithAnalyticsButton },
+      { label: "Current LB", render: (row) => quantity(row.current_qty || row.total_qty_lb) },
+      { label: "Inventory Value", render: (row) => money(row.total_inventory_value || row.inventory_value) },
+      { label: "Avg Cost/LB", render: (row) => money(row.avg_cost_per_lb) },
+      { label: "Active Lots", render: (row) => quantity(row.active_lots) },
+      { label: "Sales/Pick History", render: (row) => `${quantity(row.usage_movements_found || 0)} movements<br><small>${quantity(row.usage_days_found || 0)} usage days</small>` },
+      { label: "Sales Price Points", render: (row) => quantity(row.sales_price_points || 0) },
       { label: "Avg Daily Usage", render: (row) => quantity(row.average_daily_usage) },
       { label: "Avg Lead", render: (row) => quantity(row.avg_lead_time_days) },
       { label: "Demand During Lead", render: (row) => quantity(row.demand_during_lead_time) },
@@ -143,8 +155,18 @@ function inventoryPlanning(reports) {
       { label: "Reorder Point", render: (row) => quantity(row.reorder_point) },
       { label: "Target Stock", render: (row) => quantity(row.target_stock_level) },
       { label: "Recommended Qty", render: (row) => quantity(row.recommended_order_qty) },
-      { label: "Status", render: (row) => status(row.status) }
-    ], rows) : emptyState("No reorder/watch items right now", "Products will show here once they have min stock, target stock, supplier history, or shipped sales usage.")}
+      { label: "Status", render: (row) => status(row.planning_status || row.status) },
+      { label: "Reason", render: (row) => escapeHtml(row.reason || "") }
+    ], rows) : emptyState("No inventory planning rows yet", "Add opening inventory to build the current LB and inventory value report.")}
+  `;
+}
+
+function productWithAnalyticsButton(row) {
+  return `
+    <div class="product-planning-cell">
+      <button class="analytics-button" type="button" data-product-analytics="${escapeHtml(row.product_id)}">Analytics</button>
+      <span>${escapeHtml(row.product_name)}<br><small>${escapeHtml(row.product_id)}</small></span>
+    </div>
   `;
 }
 
@@ -179,7 +201,7 @@ function recommendations(reports) {
     <div class="panel-header report-detail-heading">
       <div>
         <h2>Recommendations</h2>
-        <p class="muted">Suggested purchase actions generated from planning metrics.</p>
+        <p class="muted">Suggested purchase actions generated only when planning has enough history.</p>
       </div>
     </div>
     ${rows.length ? table([
@@ -191,7 +213,7 @@ function recommendations(reports) {
       { label: "Target", render: (row) => quantity(row.target_stock_level) },
       { label: "Confidence", render: (row) => percent(Number(row.confidence_score || 0) * 100) },
       { label: "Reason", key: "reason_text" }
-    ], rows) : emptyState("No recommendations right now", "The system will recommend reorder actions when current stock drops below reorder or target levels.")}
+    ], rows) : emptyState("No recommendations right now", "This is expected while the system only has opening inventory or not enough sales/pick history.")}
   `;
 }
 
@@ -211,11 +233,90 @@ function inventorySnapshot(reports) {
       { label: "Location", render: (row) => escapeHtml(row.location_id || "") },
       { label: "Qty", render: (row) => quantity(row.current_qty ?? row.qty ?? 0) },
       { label: "Unit", key: "unit_type" },
-      { label: "Status", render: (row) => status(row.inventory_status || "AVAILABLE") },
-      { label: "Days Since Received", render: (row) => quantity(row.days_since_received ?? "") },
-      { label: "Recommended Action", render: (row) => escapeHtml(row.recommended_action || "Use normally") }
+      { label: "Purchase Unit Cost", render: (row) => money(row.purchase_unit_cost || row.lot?.unit_cost || 0) },
+      { label: "Cost/LB", render: (row) => money(row.cost_per_lb || row.unit_cost || 0) },
+      { label: "Inventory Value", render: (row) => money(row.inventory_value || 0) },
+      { label: "Status", render: (row) => status(row.value_status || row.inventory_status || "AVAILABLE") },
+      { label: "Days Since Received", render: (row) => quantity(row.days_since_received ?? "") }
     ], rows) : emptyState("No active lots found", "Receive product or add opening inventory to build the stock snapshot.")}
   `;
+}
+
+function enableProductAnalytics(root, reports) {
+  root.querySelectorAll("[data-product-analytics]").forEach((button) => {
+    button.addEventListener("click", () => showProductAnalytics(button.dataset.productAnalytics, reports));
+  });
+}
+
+function showProductAnalytics(productId, reports) {
+  const panel = document.getElementById("productAnalyticsPanel");
+  if (!panel) return;
+  const analytics = (reports.productPriceAnalytics || {})[productId];
+  if (!analytics) return;
+  panel.hidden = false;
+  panel.innerHTML = `
+    <div class="analytics-header">
+      <div>
+        <small>Product price analytics</small>
+        <h3>${escapeHtml(analytics.product_name || productId)}</h3>
+        <p class="muted">Average price, standard deviation, histogram, and price trend from Sales Order lines.</p>
+      </div>
+      <button class="analytics-close" type="button">Close</button>
+    </div>
+    ${Number(analytics.sales_line_count || 0) ? analyticsBody(analytics) : emptyState("Analytics not ready", "No Sales Order price history exists for this product yet.")}
+  `;
+  panel.querySelector(".analytics-close")?.addEventListener("click", () => panel.hidden = true);
+  panel.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function analyticsBody(analytics) {
+  return `
+    <div class="analytics-kpis">
+      <div><span>Average Price</span><strong>${money(analytics.average_price || analytics.avg_sales_price)}</strong></div>
+      <div><span>Std Deviation</span><strong>${money(analytics.std_price || analytics.standard_deviation_price)}</strong></div>
+      <div><span>Min Price</span><strong>${money(analytics.min_price)}</strong></div>
+      <div><span>Max Price</span><strong>${money(analytics.max_price)}</strong></div>
+    </div>
+    <div class="analytics-chart-grid">
+      <div><h4>Price Histogram</h4>${histogramSvg(analytics.histogram || [])}</div>
+      <div><h4>Price Trend</h4>${trendSvg(analytics.price_history || [], analytics.trend_line || [])}</div>
+    </div>
+  `;
+}
+
+function histogramSvg(bins) {
+  if (!bins.length) return `<div class="analytics-empty-chart">Need sales price points to build a histogram.</div>`;
+  const width = 520;
+  const height = 240;
+  const maxCount = Math.max(...bins.map((bin) => Number(bin.count || 0)), 1);
+  return `<svg class="analytics-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="Price histogram">
+    ${bins.map((bin, index) => {
+      const slot = (width - 40) / bins.length;
+      const barWidth = Math.max(8, slot - 8);
+      const barHeight = (Number(bin.count || 0) / maxCount) * (height - 62);
+      const x = 24 + index * slot;
+      const y = height - 34 - barHeight;
+      return `<rect x="${x}" y="${y}" width="${barWidth}" height="${barHeight}" rx="4"><title>${money(bin.min)} - ${money(bin.max)} · ${bin.count}</title></rect>`;
+    }).join("")}
+  </svg>`;
+}
+
+function trendSvg(points, trendLine) {
+  const parsed = points.map((point) => ({ x: new Date(point.date).getTime(), y: Number(point.price || 0), date: point.date }))
+    .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y));
+  if (!parsed.length) return `<div class="analytics-empty-chart">Need sales price points to build a trend line.</div>`;
+  const width = 520;
+  const height = 240;
+  const minX = Math.min(...parsed.map((point) => point.x));
+  const maxX = Math.max(...parsed.map((point) => point.x));
+  const minY = Math.min(...parsed.map((point) => point.y));
+  const maxY = Math.max(...parsed.map((point) => point.y));
+  const sx = (x) => 24 + ((x - minX) / Math.max(1, maxX - minX)) * (width - 48);
+  const sy = (y) => height - 34 - ((y - minY) / Math.max(1, maxY - minY)) * (height - 70);
+  const polyline = parsed.length > 1 ? `<polyline points="${parsed.map((point) => `${sx(point.x)},${sy(point.y)}`).join(" ")}" fill="none" stroke-width="2"></polyline>` : "";
+  const line = trendLine.length >= 2 ? `<line class="trend-line" x1="${sx(new Date(trendLine[0].date).getTime())}" y1="${sy(Number(trendLine[0].price || 0))}" x2="${sx(new Date(trendLine[1].date).getTime())}" y2="${sy(Number(trendLine[1].price || 0))}" stroke-width="3"></line>` : "";
+  const dots = parsed.map((point) => `<circle cx="${sx(point.x)}" cy="${sy(point.y)}" r="4"><title>${escapeHtml(point.date)} · ${money(point.y)}</title></circle>`).join("");
+  return `<svg class="analytics-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="Price trend">${polyline}${line}${dots}</svg>`;
 }
 
 function emptyState(title, body) {
@@ -228,7 +329,7 @@ function emptyState(title, body) {
 }
 
 function countStatus(rows, value) {
-  return rows.filter((row) => row.status === value).length;
+  return (rows || []).filter((row) => row.status === value || row.planning_status === value).length;
 }
 
 function supplierName(row) {
@@ -312,7 +413,28 @@ function ensureReportStyles() {
     .report-detail-panel .table-filter { min-width: min(320px, 100%); }
     .report-detail-panel table { font-size: 13px; }
     .report-detail-panel th { letter-spacing: .04em; }
-    @media (max-width: 1200px) { .report-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .formula-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    .product-planning-cell { align-items: flex-start; display: flex; gap: 10px; min-width: 220px; }
+    .analytics-button,
+    .analytics-close { background: #f8fbf9; border: 1px solid #b9cabe; border-radius: 999px; color: #226b3d; cursor: pointer; font-size: 11px; font-weight: 850; padding: 6px 9px; white-space: nowrap; }
+    .analytics-button:hover,
+    .analytics-close:hover { background: #edf3ef; border-color: #226b3d; }
+    .product-analytics-panel { background: #ffffff; border: 1px solid #d8e1da; border-radius: 12px; box-shadow: 0 6px 18px rgba(23,33,27,.08); margin-bottom: 14px; padding: 14px; }
+    .analytics-header { align-items: flex-start; display: flex; gap: 12px; justify-content: space-between; margin-bottom: 12px; }
+    .analytics-header small,
+    .analytics-kpis span { color: #667568; display: block; font-size: 11px; font-weight: 850; letter-spacing: .04em; text-transform: uppercase; }
+    .analytics-header h3 { margin: 3px 0 2px; }
+    .analytics-kpis { display: grid; gap: 10px; grid-template-columns: repeat(4, minmax(0, 1fr)); margin-bottom: 14px; }
+    .analytics-kpis div { background: #f8fbf9; border: 1px solid #d8e1da; border-radius: 10px; padding: 11px 12px; }
+    .analytics-kpis strong { color: #17211b; display: block; font-size: 22px; margin-top: 5px; }
+    .analytics-chart-grid { display: grid; gap: 14px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .analytics-chart-grid h4 { margin: 0 0 8px; }
+    .analytics-chart { background: #f8fbf9; border: 1px solid #d8e1da; border-radius: 10px; height: auto; width: 100%; }
+    .analytics-chart rect { fill: currentColor; opacity: .45; }
+    .analytics-chart circle { fill: currentColor; }
+    .analytics-chart polyline { stroke: currentColor; opacity: .55; }
+    .analytics-chart .trend-line { stroke: currentColor; opacity: .9; }
+    .analytics-empty-chart { align-items: center; background: #f8fbf9; border: 1px dashed #b9cabe; border-radius: 10px; color: #607064; display: grid; justify-items: center; min-height: 180px; padding: 18px; text-align: center; }
+    @media (max-width: 1200px) { .report-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .formula-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); } .analytics-kpis, .analytics-chart-grid { grid-template-columns: 1fr; } }
     @media (max-width: 700px) {
       .reports-overview, .report-detail-panel { padding: 14px; }
       .reports-header { gap: 8px; }
