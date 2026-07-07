@@ -16,6 +16,71 @@
   }
 }
 
+.report-detail-panel .table-wrap:has(.product-planning-cell) {
+  border-radius: 14px;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.report-detail-panel .table-wrap:has(.product-planning-cell) table {
+  min-width: 1760px;
+  table-layout: fixed;
+}
+
+.report-detail-panel .table-wrap:has(.product-planning-cell) th,
+.report-detail-panel .table-wrap:has(.product-planning-cell) td {
+  font-size: 12.5px;
+  line-height: 1.25;
+  padding: 10px 12px;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.report-detail-panel .table-wrap:has(.product-planning-cell) th {
+  font-size: 11px;
+  letter-spacing: .06em;
+  line-height: 1.15;
+  white-space: normal;
+}
+
+.report-detail-panel .table-wrap:has(.product-planning-cell) th:nth-child(1),
+.report-detail-panel .table-wrap:has(.product-planning-cell) td:nth-child(1) {
+  white-space: normal;
+  width: 285px;
+}
+
+.report-detail-panel .table-wrap:has(.product-planning-cell) th:nth-child(6),
+.report-detail-panel .table-wrap:has(.product-planning-cell) td:nth-child(6),
+.report-detail-panel .table-wrap:has(.product-planning-cell) th:nth-child(16),
+.report-detail-panel .table-wrap:has(.product-planning-cell) td:nth-child(16) {
+  white-space: normal;
+}
+
+.product-planning-cell {
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.product-planning-cell span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.report-detail-panel .analytics-button {
+  background: var(--primary);
+  border-color: var(--primary);
+  border-radius: 8px;
+  color: #ffffff;
+  flex: 0 0 auto;
+  padding: 7px 10px;
+}
+
+.report-detail-panel .analytics-button:hover {
+  background: var(--primary-dark);
+  border-color: var(--primary-dark);
+}
+
 @media (max-width: 700px) {
   .reports-overview,
   .report-detail-panel {
