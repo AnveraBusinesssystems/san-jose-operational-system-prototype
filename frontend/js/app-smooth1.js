@@ -1,4 +1,4 @@
-import { createSalesOrder, inventorySnapshot, listLocations, warmOperationalCache } from "./api-smooth1.js?v=lotpick1";
+import { createSalesOrder, inventorySnapshot, listLocations, warmOperationalCache } from "./api-smooth1.js?v=lotpick2";
 import { getSession, signIn, signOut } from "./auth.js?v=pin1";
 import { renderNavigation, renderRoute, configureRouter, navigate } from "./router.js?v=mobilehome1";
 import { allowedPages } from "./permissions.js?v=mobilehome1";
@@ -8,7 +8,7 @@ import * as products from "../pages/products.js?v=qa1";
 import * as suppliers from "../pages/suppliers.js?v=parties3";
 import * as orders from "../pages/orders.js?v=orders1";
 import * as purchaseOrders from "../pages/purchaseOrders.js?v=qa1";
-import * as salesOrders from "../pages/salesOrders.js?v=lotpick1";
+import * as salesOrders from "../pages/salesOrders.js?v=lotpick2";
 import * as receiving from "../pages/receiving.js?v=refine1";
 import * as openingInventory from "../pages/openingInventory.js?v=qa1";
 import * as inventory from "../pages/inventory.js?v=qa1";
@@ -163,7 +163,7 @@ async function enhanceSalesLotPicker(ctx) {
     button.addEventListener("click", async () => {
       try {
         const saved = await createSalesOrder(ctx.user, collectSalesPickOrder(form, byKey, choices));
-        notice(`${saved.sales_order_id} created with selected lot and warehouse space. Refresh to see it in the table.`);
+        notice(`${saved.sales_order_id} created with selected supplier lot and warehouse space. Refresh to see it in the table.`);
         form.reset();
       } catch (error) {
         notice(error.message);
@@ -177,7 +177,7 @@ function enhanceSalesLines(box, choices) {
     if (line.dataset.lotPicker) return;
     line.dataset.lotPicker = "1";
     const productField = line.querySelector("[data-product-choice]")?.closest(".field");
-    productField?.after(makeSalesPickField("Lot", "data-sales-lot-choice"), makeSalesPickField("Warehouse Space", "data-sales-location-choice"));
+    productField?.after(makeSalesPickField("Supplier Lot", "data-sales-lot-choice"), makeSalesPickField("Warehouse Space", "data-sales-location-choice"));
     fillSalesLots(line, choices, false);
   });
 }
@@ -190,7 +190,7 @@ function makeSalesPickField(labelText, marker) {
   label.textContent = labelText;
   select.setAttribute(marker, "");
   select.required = true;
-  resetSalesPickSelect(select, marker.includes("lot") ? "Choose product first" : "Choose lot first");
+  resetSalesPickSelect(select, marker.includes("lot") ? "Choose product first" : "Choose supplier lot first");
   wrap.append(label, select);
   return wrap;
 }
@@ -198,9 +198,9 @@ function makeSalesPickField(labelText, marker) {
 function fillSalesLots(line, choices, keep) {
   const productId = salesPickProduct(line);
   const lotSelect = line.querySelector("[data-sales-lot-choice]");
-  if (!productId) return resetSalesPickSelect(lotSelect, "Choose product first"), resetSalesPickSelect(line.querySelector("[data-sales-location-choice]"), "Choose lot first");
+  if (!productId) return resetSalesPickSelect(lotSelect, "Choose product first"), resetSalesPickSelect(line.querySelector("[data-sales-location-choice]"), "Choose supplier lot first");
   const lots = salesLotOptions(productId, choices, salesPickNeed(line));
-  if (!lots.length) return resetSalesPickSelect(lotSelect, "No active lots"), resetSalesPickSelect(line.querySelector("[data-sales-location-choice]"), "No spaces");
+  if (!lots.length) return resetSalesPickSelect(lotSelect, "No supplier lots"), resetSalesPickSelect(line.querySelector("[data-sales-location-choice]"), "No spaces");
   const previous = keep ? lotSelect.value : "";
   const selected = lots.some((lot) => lot.id === previous) ? previous : lots[0].id;
   lotSelect.disabled = false;
@@ -210,9 +210,9 @@ function fillSalesLots(line, choices, keep) {
 }
 
 function fillSalesSpaces(line, choices, keep) {
-  const spaces = choices.filter((choice) => choice.product === salesPickProduct(line) && choice.lot === (line.querySelector("[data-sales-lot-choice]")?.value || "")).sort((a, b) => salesSpaceSort(a, b, salesPickNeed(line)));
+  const spaces = choices.filter((choice) => choice.product === salesPickProduct(line) && choice.supplierLot === (line.querySelector("[data-sales-lot-choice]")?.value || "")).sort((a, b) => salesSpaceSort(a, b, salesPickNeed(line)));
   const spaceSelect = line.querySelector("[data-sales-location-choice]");
-  if (!spaces.length) return resetSalesPickSelect(spaceSelect, "No spaces for lot");
+  if (!spaces.length) return resetSalesPickSelect(spaceSelect, "No spaces for supplier lot");
   const previous = keep ? spaceSelect.value : "";
   const selected = spaces.some((space) => space.key === previous) ? previous : spaces[0].key;
   spaceSelect.disabled = false;
@@ -225,12 +225,12 @@ function updateSalesPickPreview(line, choices) {
   const preview = line.querySelector("[data-allocation-preview]");
   const fact = line.querySelector("[data-fefo]");
   if (!preview || !fact) return;
-  if (!salesPickProduct(line)) { preview.textContent = "Choose a product to see recommended lots and spaces."; fact.textContent = "Choose product"; return; }
-  if (!chosen) { preview.textContent = "Choose a lot and warehouse space for this product."; fact.textContent = "Choose lot/space"; return; }
+  if (!salesPickProduct(line)) { preview.textContent = "Choose a product to see recommended supplier lots and spaces."; fact.textContent = "Choose product"; return; }
+  if (!chosen) { preview.textContent = "Choose a supplier lot and warehouse space for this product."; fact.textContent = "Choose supplier lot/space"; return; }
   const best = choices.filter((choice) => choice.product === salesPickProduct(line)).sort((a, b) => salesChoiceSort(a, b, salesPickNeed(line)))[0];
   const short = salesPickNeed(line) > chosen.qty + 0.0001;
   fact.textContent = short ? "Short space" : best?.key === chosen.key ? "FIFO/front pick" : "Manual override";
-  preview.textContent = `${short ? "Selected space is short. " : ""}Selected ${chosen.lot} @ ${chosen.label}. System recommends ${best?.lot || ""} @ ${best?.label || ""}.`;
+  preview.textContent = `${short ? "Selected space is short. " : ""}Selected supplier lot ${chosen.supplierLot} @ ${chosen.label}. System recommends supplier lot ${best?.supplierLot || ""} @ ${best?.label || ""}.`;
 }
 
 function collectSalesPickOrder(form, byKey, choices) {
@@ -242,13 +242,13 @@ function collectSalesPickOrder(form, byKey, choices) {
     const weight = salesPickNumber(line, "unit_weight_lbs");
     const required = qty * weight;
     if (!salesPickProduct(line)) throw new Error(`Select a product on line ${index + 1}.`);
-    if (!line.querySelector("[data-sales-lot-choice]")?.value) throw new Error(`Select a lot on line ${index + 1}.`);
+    if (!line.querySelector("[data-sales-lot-choice]")?.value) throw new Error(`Select a supplier lot on line ${index + 1}.`);
     if (!chosen) throw new Error(`Select a warehouse space on line ${index + 1}.`);
     const remaining = chosen.qty - (used.get(chosen.key) || 0);
     if (required > remaining + 0.0001) throw new Error(`Line ${index + 1} needs ${formatQuantity(required)} LB, but ${chosen.label} only has ${formatQuantity(remaining)} LB.`);
     used.set(chosen.key, (used.get(chosen.key) || 0) + required);
     const best = choices.filter((choice) => choice.product === salesPickProduct(line)).sort((a, b) => salesChoiceSort(a, b, required))[0];
-    return { product_id: chosen.product, internal_lot_id: chosen.lot, location_id: chosen.location, qty_ordered: qty, unit_type: salesPickUnit(line), unit_weight_lbs: weight, unit_price: salesPickNumber(line, "unit_price"), unit_cost: Number((chosen.cost * weight).toFixed(4)), notes: best?.key === chosen.key ? "System recommended FIFO/front-pick space." : `Manual override. Recommended ${best?.lot || ""} @ ${best?.location || ""}.` };
+    return { product_id: chosen.product, internal_lot_id: chosen.internalLot, location_id: chosen.location, qty_ordered: qty, unit_type: salesPickUnit(line), unit_weight_lbs: weight, unit_price: salesPickNumber(line, "unit_price"), unit_cost: Number((chosen.cost * weight).toFixed(4)), notes: best?.key === chosen.key ? `System recommended supplier lot ${chosen.supplierLot} and front-pick space.` : `Manual override. Recommended supplier lot ${best?.supplierLot || ""} @ ${best?.location || ""}.` };
   });
   return { customer_id: form.elements.customer_id.value, order_date: form.elements.order_date.value, requested_delivery_date: form.elements.requested_delivery_date.value, sales_channel: form.elements.sales_channel.value, ship_method: form.elements.ship_method.value, payment_terms: form.elements.payment_terms.value, shipping_address: form.elements.shipping_address.value.trim(), tax_enabled: form.elements.tax_enabled.checked, tax_rate_percent: Number(form.elements.tax_rate_percent.value || 6.25), notes: form.elements.notes.value, lines };
 }
@@ -266,17 +266,19 @@ function buildSalesPickChoices(rows, locations) {
     const pack = String(lot.purchase_unit_type || item.default_unit || unit).toUpperCase();
     const weight = salesLotWeight(lot);
     const priority = salesPriority(loc, location);
-    return { key: `${row.product_id}|${row.internal_lot_id}|${location}`, product: row.product_id, lot: row.internal_lot_id, location, label: salesLocationLabel(loc, location), qty: Number(row.available_qty ?? row.qty ?? row.current_qty ?? 0), cost: unit === pack ? Number(lot.unit_cost || 0) : Number(lot.unit_cost || 0) / weight, expSort: exp ? exp.getTime() : Number.MAX_SAFE_INTEGER, receivedSort: new Date(lot.received_date || 0).getTime(), priority, front: priority <= 2, status: String(lot.status || "ACTIVE").toUpperCase() };
-  }).filter((choice) => choice.product && choice.lot && choice.location && choice.qty > 0 && ["ACTIVE", "AVAILABLE", ""].includes(choice.status) && (!Number.isFinite(choice.expSort) || choice.expSort >= now));
+    const internalLot = String(row.internal_lot_id || lot.internal_lot_id || "");
+    const supplierLot = String(lot.supplier_lot_number || row.supplier_lot_number || row.supplier_lot || lot.lot_number || internalLot || "");
+    return { key: `${row.product_id}|${internalLot}|${location}`, product: row.product_id, supplierLot, internalLot, lot: supplierLot, location, label: salesLocationLabel(loc, location), qty: Number(row.available_qty ?? row.qty ?? row.current_qty ?? 0), cost: unit === pack ? Number(lot.unit_cost || 0) : Number(lot.unit_cost || 0) / weight, expSort: exp ? exp.getTime() : Number.MAX_SAFE_INTEGER, receivedSort: new Date(lot.received_date || 0).getTime(), priority, front: priority <= 2, status: String(lot.status || "ACTIVE").toUpperCase() };
+  }).filter((choice) => choice.product && choice.supplierLot && choice.internalLot && choice.location && choice.qty > 0 && ["ACTIVE", "AVAILABLE", ""].includes(choice.status) && (!Number.isFinite(choice.expSort) || choice.expSort >= now));
 }
 
 function salesLotOptions(productId, choices, required) {
   const lots = new Map();
   choices.filter((choice) => choice.product === productId).forEach((choice) => {
-    const lot = lots.get(choice.lot) || { id: choice.lot, qty: 0, expSort: choice.expSort, receivedSort: choice.receivedSort, spaces: [] };
+    const lot = lots.get(choice.supplierLot) || { id: choice.supplierLot, qty: 0, expSort: choice.expSort, receivedSort: choice.receivedSort, spaces: [] };
     lot.qty += choice.qty;
     lot.spaces.push(choice);
-    lots.set(choice.lot, lot);
+    lots.set(choice.supplierLot, lot);
   });
   return [...lots.values()].map((lot) => ({ ...lot, best: [...lot.spaces].sort((a, b) => salesSpaceSort(a, b, required))[0] })).sort((a, b) => a.expSort - b.expSort || a.receivedSort - b.receivedSort || (a.qty >= required ? 0 : 1) - (b.qty >= required ? 0 : 1) || salesSpaceSort(a.best, b.best, required));
 }
