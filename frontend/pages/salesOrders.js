@@ -2,6 +2,7 @@ import {
   createSalesOrder,
   getSalesOrderDetail,
   inventorySnapshot,
+  listLocations,
   listSalesOrders,
   listSuppliers,
   salesOrderAction
@@ -15,10 +16,16 @@ const SHIP_METHODS = ["CUSTOMER_PICKUP", "SAN_JOSE_DELIVERY", "LTL_FREIGHT", "PA
 let nextSalesLineId = 1;
 
 export async function render(ctx) {
-  ctx.setTitle("Sales Orders", "Sell available inventory with FEFO lot recommendations");
-  const [orders, parties, inventoryRows] = await Promise.all([listSalesOrders(), listSuppliers(), inventorySnapshot()]);
+  ctx.setTitle("Sales Orders", "Sell available inventory with FIFO lot and space recommendations");
+  const [orders, parties, inventoryRows, locations] = await Promise.all([
+    listSalesOrders(),
+    listSuppliers(),
+    inventorySnapshot(),
+    listLocations()
+  ]);
   const customers = parties.filter(isActive).filter(isCustomer);
-  const inventoryChoices = buildInventoryChoices(inventoryRows);
+  const locationMap = new Map((locations || []).map((location) => [String(location.location_id || ""), location]));
+  const inventoryChoices = buildInventoryChoices(inventoryRows, locationMap);
   const productChoices = buildProductChoices(inventoryChoices);
 
   ctx.view.innerHTML = `
@@ -55,7 +62,7 @@ function salesOrderForm(customers, productChoices) {
       <div class="panel-header">
         <div>
           <h2>Create Sales Order</h2>
-          <p class="muted">Choose the product once. The app recommends the FEFO lots needed to cover the order.</p>
+          <p class="muted">Choose a product, then confirm or override the recommended supplier lot and warehouse space.</p>
         </div>
       </div>
       <form id="salesOrderForm">
@@ -150,22 +157,33 @@ function setupSalesOrderBuilder(ctx, customers, inventoryChoices, productChoices
       form.elements.tax_rate_percent.disabled = !event.target.checked;
     }
     const line = event.target.closest(".po-line-item");
-    if (line && event.target.matches("[data-product-choice]")) applyProductChoice(line, productMap.get(event.target.value), inventoryChoices);
+    if (line && event.target.matches("[data-product-choice]")) {
+      applyProductChoice(line, productMap.get(event.target.value), inventoryChoices);
+      refreshLotSelect(line, inventoryChoices, false);
+    }
+    if (line && event.target.matches("[data-supplier-lot-choice]")) {
+      refreshLocationSelect(line, inventoryChoices, false);
+    }
     if (line && event.target.matches('[data-line-field="unit_type"]')) applySalesUnit(line);
     if (line) updateSalesLine(line, inventoryChoices);
     updateSalesTotals(form);
   });
   form.addEventListener("input", (event) => {
     const line = event.target.closest(".po-line-item");
-    if (line) updateSalesLine(line, inventoryChoices);
+    if (line) {
+      if (event.target.matches('[data-line-field="qty_ordered"], [data-line-field="unit_weight_lbs"]')) {
+        refreshLotSelect(line, inventoryChoices, true);
+      }
+      updateSalesLine(line, inventoryChoices);
+    }
     updateSalesTotals(form);
   });
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     try {
-      const input = collectSalesOrder(form, choiceMap);
+      const input = collectSalesOrder(form, choiceMap, inventoryChoices);
       const result = await createSalesOrder(ctx.user, input);
-      notice(`${result.sales_order_id} created with ${result.lines.length} inventory allocation${result.lines.length === 1 ? "" : "s"}.`);
+      notice(`${result.sales_order_id} created with ${result.lines.length} selected inventory allocation${result.lines.length === 1 ? "" : "s"}.`);
       await render(ctx);
     } catch (error) {
       notice(error.message);
@@ -189,6 +207,18 @@ function appendSalesLine(container, productChoices) {
             ${productChoices.map((product) => `<option value="${escapeHtml(product.productId)}">${escapeHtml(product.productName)} | ${formatNumber(product.availableLb)} LB available</option>`).join("")}
           </select>
         </div>
+        <div class="field">
+          <label>Supplier Lot</label>
+          <select data-supplier-lot-choice required disabled>
+            <option value="">Choose product first</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Warehouse Space</label>
+          <select data-location-choice required disabled>
+            <option value="">Choose supplier lot first</option>
+          </select>
+        </div>
         <div class="field"><label>Quantity Sold</label><input data-line-field="qty_ordered" type="number" min="0.01" step="0.01" value="1" required></div>
         <div class="field">
           <label>Sales Unit</label>
@@ -201,11 +231,11 @@ function appendSalesLine(container, productChoices) {
       <div class="sales-line-facts">
         <span>Available <strong data-available>Choose product</strong></span>
         <span>Total Weight <strong data-total-weight>0 LB</strong></span>
-        <span>FEFO Lots <strong data-fefo>Choose product</strong></span>
+        <span>FIFO Pick <strong data-fefo>Choose product</strong></span>
         <span>Line Total <strong data-line-total>$0.00</strong></span>
         <span>Gross Profit <strong data-line-profit>$0.00</strong></span>
       </div>
-      <div class="sales-allocation-preview" data-allocation-preview>Choose a product to see recommended lots.</div>
+      <div class="sales-allocation-preview" data-allocation-preview>Choose a product to see the recommended supplier lot and space.</div>
     </section>
   `);
   updateSalesRemoveButtons(container);
@@ -214,9 +244,11 @@ function appendSalesLine(container, productChoices) {
 function applyProductChoice(line, product, inventoryChoices) {
   if (!product) {
     line.dataset.productId = "";
+    line.dataset.productName = "";
     line.querySelector("[data-available]").textContent = "Choose product";
     line.querySelector("[data-fefo]").textContent = "Choose product";
-    line.querySelector("[data-allocation-preview]").textContent = "Choose a product to see recommended lots.";
+    line.querySelector("[data-allocation-preview]").textContent = "Choose a product to see the recommended supplier lot and space.";
+    resetLotAndLocationSelects(line);
     updateSalesLine(line, inventoryChoices);
     return;
   }
@@ -232,6 +264,67 @@ function applySalesUnit(line) {
   const unit = line.querySelector('[data-line-field="unit_type"]').value;
   const weightInput = line.querySelector('[data-line-field="unit_weight_lbs"]');
   if (unit === "LB") weightInput.value = "1";
+}
+
+function refreshLotSelect(line, inventoryChoices, preserveCurrent) {
+  const productId = line.dataset.productId || line.querySelector("[data-product-choice]")?.value || "";
+  const lotSelect = line.querySelector("[data-supplier-lot-choice]");
+  if (!lotSelect) return;
+  const current = preserveCurrent ? lotSelect.value : "";
+  const summaries = supplierLotSummaries(productId, inventoryChoices, requiredWeight(line));
+  if (!productId) {
+    resetLotAndLocationSelects(line);
+    return;
+  }
+  if (!summaries.length) {
+    lotSelect.disabled = true;
+    lotSelect.innerHTML = `<option value="">No supplier lots available</option>`;
+    refreshLocationSelect(line, inventoryChoices, false);
+    return;
+  }
+  lotSelect.disabled = false;
+  lotSelect.innerHTML = summaries
+    .map((summary) => `<option value="${escapeHtml(summary.supplierLotKey)}">${escapeHtml(summary.displayLot)}</option>`)
+    .join("");
+  const stillValid = summaries.some((summary) => summary.supplierLotKey === current);
+  lotSelect.value = stillValid ? current : summaries[0].supplierLotKey;
+  refreshLocationSelect(line, inventoryChoices, preserveCurrent && stillValid);
+}
+
+function refreshLocationSelect(line, inventoryChoices, preserveCurrent) {
+  const locationSelect = line.querySelector("[data-location-choice]");
+  if (!locationSelect) return;
+  const current = preserveCurrent ? locationSelect.value : "";
+  const choices = locationChoicesForLine(line, inventoryChoices);
+  if (!line.querySelector("[data-supplier-lot-choice]")?.value) {
+    locationSelect.disabled = true;
+    locationSelect.innerHTML = `<option value="">Choose supplier lot first</option>`;
+    return;
+  }
+  if (!choices.length) {
+    locationSelect.disabled = true;
+    locationSelect.innerHTML = `<option value="">No spaces available</option>`;
+    return;
+  }
+  locationSelect.disabled = false;
+  locationSelect.innerHTML = choices
+    .map((choice) => `<option value="${escapeHtml(choice.key)}">${escapeHtml(choice.locationLabel)}</option>`)
+    .join("");
+  const stillValid = choices.some((choice) => choice.key === current);
+  locationSelect.value = stillValid ? current : choices[0].key;
+}
+
+function resetLotAndLocationSelects(line) {
+  const lotSelect = line.querySelector("[data-supplier-lot-choice]");
+  const locationSelect = line.querySelector("[data-location-choice]");
+  if (lotSelect) {
+    lotSelect.disabled = true;
+    lotSelect.innerHTML = `<option value="">Choose product first</option>`;
+  }
+  if (locationSelect) {
+    locationSelect.disabled = true;
+    locationSelect.innerHTML = `<option value="">Choose supplier lot first</option>`;
+  }
 }
 
 function updateSalesLine(line, inventoryChoices = []) {
@@ -256,48 +349,28 @@ function recommendLotsForLine(line, inventoryChoices) {
   const unit = line.querySelector('[data-line-field="unit_type"]').value;
   const weight = numericLineValue(line, "unit_weight_lbs");
   const neededWeight = qty * weight;
-  if (!productId) return { unitCost: 0, status: "Choose product", html: "Choose a product to see recommended lots." };
-  if (qty <= 0 || weight <= 0) return { unitCost: 0, status: "Enter quantity", html: "Enter a quantity and weight to calculate lot recommendations." };
+  const choice = selectedChoiceForLine(line, inventoryChoices);
+  if (!productId) return { unitCost: 0, status: "Choose product", html: "Choose a product to see the recommended supplier lot and space." };
+  if (qty <= 0 || weight <= 0) return { unitCost: 0, status: "Enter quantity", html: "Enter a quantity and weight to calculate recommendations." };
+  if (!line.querySelector("[data-supplier-lot-choice]")?.value) return { unitCost: 0, status: "Choose lot", html: "Choose a supplier lot." };
+  if (!choice) return { unitCost: 0, status: "Choose space", html: "Choose a warehouse space." };
 
-  const candidates = inventoryChoices
-    .filter((choice) => choice.productId === productId && choice.inventoryUnit === "LB")
-    .sort(compareFefoChoices);
-  const allocations = [];
-  let remainingWeight = neededWeight;
-  let totalCost = 0;
-
-  candidates.forEach((choice) => {
-    if (remainingWeight <= 0.0001) return;
-    const allocatedWeight = Math.min(remainingWeight, choice.availableInventoryQty);
-    if (allocatedWeight <= 0) return;
-    const allocatedUnits = allocatedWeight / weight;
-    totalCost += allocatedWeight * choice.baseUnitCost;
-    allocations.push({ choice, allocatedWeight, allocatedUnits });
-    remainingWeight -= allocatedWeight;
-  });
-
-  if (!allocations.length) {
-    return { unitCost: 0, status: "No stock", html: "No available sellable lots for this product." };
-  }
-
-  const averageUnitCost = neededWeight > 0 ? totalCost / qty : 0;
-  const short = remainingWeight > 0.0001;
+  const short = neededWeight - choice.availableInventoryQty > 0.0001;
+  const recommended = isRecommendedChoice(line, choice, inventoryChoices);
+  const unitCost = choice.baseUnitCost * weight;
   const html = `
     <div class="sales-allocation-summary ${short ? "is-short" : ""}">
       ${short
-        ? `Short ${escapeHtml(formatNumber(remainingWeight))} LB. Available lots cover ${escapeHtml(formatNumber(neededWeight - remainingWeight))} of ${escapeHtml(formatNumber(neededWeight))} LB.`
-        : `Recommended FEFO split covers ${escapeHtml(formatNumber(qty))} ${escapeHtml(unit)} (${escapeHtml(formatNumber(neededWeight))} LB).`}
+        ? `Selected space has ${escapeHtml(formatNumber(choice.availableInventoryQty))} LB available but this line needs ${escapeHtml(formatNumber(neededWeight))} LB.`
+        : `${recommended ? "Recommended" : "Manual override"}: supplier lot ${escapeHtml(choice.displayLot)} from ${escapeHtml(choice.locationLabel)} covers ${escapeHtml(formatNumber(qty))} ${escapeHtml(unit)} (${escapeHtml(formatNumber(neededWeight))} LB).`}
     </div>
     <div class="sales-allocation-list">
-      ${allocations.map(({ choice, allocatedWeight, allocatedUnits }) => {
-        const originalUnits = choice.unitWeight > 0 ? allocatedWeight / choice.unitWeight : 0;
-        return `<span>${escapeHtml(choice.lotId)} @ ${escapeHtml(choice.locationId)}: ${escapeHtml(formatNumber(allocatedUnits))} ${escapeHtml(unit)} / ${escapeHtml(formatNumber(allocatedWeight))} LB <small>(${escapeHtml(formatNumber(originalUnits))} ${escapeHtml(choice.salesUnit)} from lot)</small></span>`;
-      }).join("")}
+      <span>${escapeHtml(choice.locationLabel)}: ${escapeHtml(formatNumber(choice.availableInventoryQty))} LB available</span>
     </div>
   `;
   return {
-    unitCost: averageUnitCost,
-    status: short ? "Short stock" : `${allocations.length} lot${allocations.length === 1 ? "" : "s"}`,
+    unitCost,
+    status: short ? "Short stock" : recommended ? "Recommended" : "Override",
     html
   };
 }
@@ -321,20 +394,44 @@ function updateSalesTotals(form) {
   document.getElementById("salesTotal").textContent = money(totals.subtotal + tax);
 }
 
-function collectSalesOrder(form, choiceMap) {
+function collectSalesOrder(form, choiceMap, inventoryChoices) {
   if (!form.elements.customer_id.value) throw new Error("Select a customer.");
   const allocatedByChoice = new Map();
-  const lines = Array.from(form.querySelectorAll(".sales-line-item")).flatMap((line, index) => {
+  const lines = Array.from(form.querySelectorAll(".sales-line-item")).map((line, index) => {
     const productId = line.querySelector("[data-product-choice]").value;
+    const selectedKey = line.querySelector("[data-location-choice]")?.value || "";
+    const choice = choiceMap.get(selectedKey);
     if (!productId) throw new Error(`Select a product on line ${index + 1}.`);
+    if (!line.querySelector("[data-supplier-lot-choice]")?.value) throw new Error(`Select a supplier lot on line ${index + 1}.`);
+    if (!selectedKey || !choice) throw new Error(`Select a warehouse space on line ${index + 1}.`);
+    if (choice.productId !== productId) throw new Error(`Selected space does not match the product on line ${index + 1}.`);
     const qty = numericLineValue(line, "qty_ordered");
     const unit = line.querySelector('[data-line-field="unit_type"]').value;
     const weight = numericLineValue(line, "unit_weight_lbs");
     const price = numericLineValue(line, "unit_price");
+    const requiredInventoryQty = qty * weight;
     if (qty <= 0) throw new Error(`Quantity must be greater than zero on line ${index + 1}.`);
     if (weight <= 0) throw new Error(`Unit weight must be greater than zero on line ${index + 1}.`);
     if (price < 0) throw new Error(`Unit price cannot be negative on line ${index + 1}.`);
-    return allocateFefoLots(productId, qty, unit, weight, price, choiceMap, allocatedByChoice, index + 1);
+    const alreadyAllocated = allocatedByChoice.get(choice.key) || 0;
+    if (alreadyAllocated + requiredInventoryQty > choice.availableInventoryQty + 0.0001) {
+      throw new Error(`Line ${index + 1} exceeds the available quantity for the selected supplier lot and space.`);
+    }
+    allocatedByChoice.set(choice.key, alreadyAllocated + requiredInventoryQty);
+    return {
+      product_id: choice.productId,
+      internal_lot_id: choice.lotId,
+      location_id: choice.locationId,
+      qty_ordered: qty,
+      unit_type: unit,
+      unit_weight_lbs: weight,
+      inventory_qty_required: Number(requiredInventoryQty.toFixed(4)),
+      inventory_unit_type: choice.inventoryUnit,
+      unit_price: price,
+      unit_cost: Number((choice.baseUnitCost * weight).toFixed(4)),
+      expiration_date: choice.expirationDate,
+      fefo_status: isRecommendedChoice(line, choice, inventoryChoices) ? "RECOMMENDED" : "OVERRIDE"
+    };
   });
   return {
     customer_id: form.elements.customer_id.value,
@@ -351,58 +448,36 @@ function collectSalesOrder(form, choiceMap) {
   };
 }
 
-function allocateFefoLots(productId, requestedQty, unit, weight, price, choiceMap, allocatedByChoice, lineNumber) {
-  const candidates = Array.from(choiceMap.values())
-    .filter((choice) => choice.productId === productId && choice.inventoryUnit === "LB")
-    .sort(compareFefoChoices);
-  const allocations = [];
-  let remainingWeight = requestedQty * weight;
-
-  candidates.forEach((choice) => {
-    if (remainingWeight <= 0.0001) return;
-    const alreadyAllocated = allocatedByChoice.get(choice.key) || 0;
-    const availableWeight = Math.max(0, choice.availableInventoryQty - alreadyAllocated);
-    const allocatedWeight = Math.min(remainingWeight, availableWeight);
-    if (allocatedWeight <= 0) return;
-    const allocatedSalesQty = allocatedWeight / weight;
-    allocatedByChoice.set(choice.key, alreadyAllocated + allocatedWeight);
-    allocations.push({
-      product_id: choice.productId,
-      internal_lot_id: choice.lotId,
-      location_id: choice.locationId,
-      qty_ordered: Number(allocatedSalesQty.toFixed(4)),
-      unit_type: unit,
-      unit_weight_lbs: weight,
-      unit_price: price,
-      unit_cost: choice.baseUnitCost * weight
-    });
-    remainingWeight -= allocatedWeight;
-  });
-
-  if (remainingWeight > 0.0001) {
-    throw new Error(`Line ${lineNumber} needs ${formatNumber(requestedQty * weight)} LB, but only ${formatNumber(requestedQty * weight - remainingWeight)} LB is available for this product.`);
-  }
-  return allocations;
-}
-
-function buildInventoryChoices(rows) {
+function buildInventoryChoices(rows, locationMap = new Map()) {
   const today = startOfDay(new Date());
   const choices = rows.map((row) => {
     const lot = row.lot || {};
     const product = row.product || {};
+    const location = locationMap.get(String(row.location_id || "")) || {};
     const availableInventoryQty = Number(row.available_qty ?? row.qty ?? row.current_qty ?? 0);
     const expiration = effectiveExpiration(lot, product);
     const unitWeight = lotUnitWeight(lot);
     const inventoryUnit = String(row.unit_type || lot.unit_type || "LB").toUpperCase();
-    const salesUnit = String(lot.purchase_unit_type || inventoryUnit).toUpperCase();
+    const salesUnit = String(lot.purchase_unit_type || row.purchase_unit_type || inventoryUnit).toUpperCase();
     const availableSalesQty = inventoryUnit === salesUnit ? availableInventoryQty : inventoryUnit === "LB" ? availableInventoryQty / unitWeight : 0;
-    const baseUnitCost = inventoryUnit === salesUnit ? Number(lot.unit_cost || 0) : Number(lot.unit_cost || 0) / unitWeight;
+    const snapshotUnitCost = Number(row.unit_cost ?? row.cost_per_lb ?? 0);
+    const purchaseUnitCost = Number(lot.unit_cost || row.purchase_unit_cost || 0);
+    const baseUnitCost = snapshotUnitCost > 0 ? snapshotUnitCost : inventoryUnit === salesUnit ? purchaseUnitCost : purchaseUnitCost / unitWeight;
+    const supplierLotNumber = String(lot.supplier_lot_number || row.supplier_lot_number || "").trim();
+    const lotId = String(row.internal_lot_id || "").trim();
+    const displayLot = supplierLotNumber || lotId || "UNKNOWN LOT";
+    const productId = String(row.product_id || "").trim();
     return {
-      key: `${row.product_id}|${row.internal_lot_id}|${row.location_id}`,
-      productId: row.product_id,
-      productName: product.product_name || row.product_id,
-      lotId: row.internal_lot_id,
-      locationId: row.location_id,
+      key: `${productId}|${lotId}|${row.location_id}`,
+      productId,
+      productName: product.product_name || row.product_name || productId,
+      lotId,
+      supplierLotNumber,
+      supplierLotKey: `${productId}|${displayLot}`,
+      displayLot,
+      locationId: String(row.location_id || "").trim(),
+      locationLabel: locationLabel(location, row.location_id),
+      locationPriority: locationPriority(location, row.location_id),
       inventoryUnit,
       salesUnit,
       unitWeight,
@@ -412,18 +487,24 @@ function buildInventoryChoices(rows) {
       availableSalesQty,
       expirationDate: expiration ? dateValue(expiration) : "",
       expirationSort: expiration ? expiration.getTime() : Number.MAX_SAFE_INTEGER,
-      receivedSort: new Date(lot.received_date || 0).getTime(),
+      receivedSort: receivedSortValue(lot),
       lotStatus: String(lot.status || "ACTIVE").toUpperCase()
     };
   }).filter((choice) =>
-    choice.availableInventoryQty > 0
+    choice.productId
+    && choice.lotId
+    && choice.locationId
+    && choice.inventoryUnit === "LB"
+    && choice.availableInventoryQty > 0
     && choice.availableSalesQty > 0
     && ["ACTIVE", "AVAILABLE"].includes(choice.lotStatus)
     && (!choice.expirationDate || startOfDay(choice.expirationDate) >= today)
   ).sort((a, b) =>
     a.productName.localeCompare(b.productName)
-    || a.expirationSort - b.expirationSort
     || a.receivedSort - b.receivedSort
+    || a.expirationSort - b.expirationSort
+    || a.displayLot.localeCompare(b.displayLot)
+    || a.locationPriority - b.locationPriority
   );
 
   const recommendedVariations = new Set();
@@ -431,7 +512,6 @@ function buildInventoryChoices(rows) {
     const variation = `${choice.productId}|${choice.salesUnit}|${choice.unitWeight}`;
     choice.recommended = !recommendedVariations.has(variation);
     recommendedVariations.add(variation);
-    choice.label = `${choice.recommended ? "[RECOMMENDED] " : ""}${choice.productName} | ${choice.lotId} | ${formatNumber(choice.unitWeight)} LB ${choice.salesUnit} | ${choice.locationId} | ${formatNumber(choice.availableSalesQty)} available | ${choice.expirationDate || "No expiration"}`;
   });
   return choices;
 }
@@ -461,11 +541,97 @@ function buildProductChoices(inventoryChoices) {
     .sort((a, b) => a.productName.localeCompare(b.productName));
 }
 
-function compareFefoChoices(a, b) {
-  return a.expirationSort - b.expirationSort
+function supplierLotSummaries(productId, inventoryChoices, neededWeight) {
+  const lots = new Map();
+  inventoryChoices
+    .filter((choice) => choice.productId === productId)
+    .forEach((choice) => {
+      const current = lots.get(choice.supplierLotKey) || {
+        supplierLotKey: choice.supplierLotKey,
+        displayLot: choice.displayLot,
+        availableInventoryQty: 0,
+        receivedSort: choice.receivedSort,
+        expirationSort: choice.expirationSort
+      };
+      current.availableInventoryQty += choice.availableInventoryQty;
+      current.receivedSort = Math.min(current.receivedSort, choice.receivedSort);
+      current.expirationSort = Math.min(current.expirationSort, choice.expirationSort);
+      lots.set(choice.supplierLotKey, current);
+    });
+  return Array.from(lots.values()).sort((a, b) => compareSupplierLots(a, b, neededWeight));
+}
+
+function compareSupplierLots(a, b, neededWeight) {
+  const aCanFill = neededWeight <= 0 || a.availableInventoryQty + 0.0001 >= neededWeight;
+  const bCanFill = neededWeight <= 0 || b.availableInventoryQty + 0.0001 >= neededWeight;
+  return Number(bCanFill) - Number(aCanFill)
     || a.receivedSort - b.receivedSort
-    || a.lotId.localeCompare(b.lotId)
-    || a.locationId.localeCompare(b.locationId);
+    || a.expirationSort - b.expirationSort
+    || a.displayLot.localeCompare(b.displayLot);
+}
+
+function locationChoicesForLine(line, inventoryChoices) {
+  const productId = line.dataset.productId || "";
+  const supplierLotKey = line.querySelector("[data-supplier-lot-choice]")?.value || "";
+  const neededWeight = requiredWeight(line);
+  return inventoryChoices
+    .filter((choice) => choice.productId === productId && choice.supplierLotKey === supplierLotKey)
+    .sort((a, b) => compareLocationChoices(a, b, neededWeight));
+}
+
+function compareLocationChoices(a, b, neededWeight) {
+  const aCanFill = neededWeight <= 0 || a.availableInventoryQty + 0.0001 >= neededWeight;
+  const bCanFill = neededWeight <= 0 || b.availableInventoryQty + 0.0001 >= neededWeight;
+  return Number(bCanFill) - Number(aCanFill)
+    || a.receivedSort - b.receivedSort
+    || a.expirationSort - b.expirationSort
+    || a.locationPriority - b.locationPriority
+    || b.availableInventoryQty - a.availableInventoryQty
+    || a.locationLabel.localeCompare(b.locationLabel);
+}
+
+function selectedChoiceForLine(line, inventoryChoices) {
+  const selectedKey = line.querySelector("[data-location-choice]")?.value || "";
+  return inventoryChoices.find((choice) => choice.key === selectedKey) || null;
+}
+
+function isRecommendedChoice(line, choice, inventoryChoices) {
+  const recommended = locationChoicesForLine(line, inventoryChoices)[0];
+  return Boolean(recommended && choice && recommended.key === choice.key);
+}
+
+function requiredWeight(line) {
+  return numericLineValue(line, "qty_ordered") * numericLineValue(line, "unit_weight_lbs");
+}
+
+function receivedSortValue(lot) {
+  const received = new Date(lot.received_date || 0).getTime();
+  return Number.isFinite(received) && received > 0 ? received : Number.MAX_SAFE_INTEGER;
+}
+
+function locationLabel(location, fallback) {
+  return String(location.location_id || fallback || "").trim() || "UNKNOWN SPACE";
+}
+
+function locationPriority(location, fallback) {
+  const explicit = Number(location.priority_rank || location.pick_priority || 0);
+  if (Number.isFinite(explicit) && explicit > 0) return explicit;
+  const text = [
+    fallback,
+    location.location_id,
+    location.zone,
+    location.aisle,
+    location.rack,
+    location.level,
+    location.bin,
+    location.location_type,
+    location.current_status,
+    location.notes
+  ].map((value) => String(value || "").toUpperCase()).join(" ");
+  if (/\b(FRONT|PICK|PICKING|STAGE|STAGING|DOCK|FAST)\b/.test(text)) return 1;
+  if (/\b(MID|MIDDLE|AISLE)\b/.test(text)) return 5;
+  if (/\b(BACK|RESERVE|RESERVED|BULK|DEEP|HIGH)\b/.test(text)) return 10;
+  return 6;
 }
 
 function setupSalesOrderActions(ctx) {
@@ -540,7 +706,7 @@ export function printableBillOfLading(detail) {
         const qty = Number(line.qty_ordered || 0);
         const unit = String(line.unit_type || "").toUpperCase();
         const boxes = ["CASE", "BOX"].includes(unit) ? formatNumber(qty) : `${formatNumber(qty)} ${unit}`;
-        return `<tr><td class="product">${escapeHtml(line.product?.product_name || line.product_id)}<small>${escapeHtml(line.product_id)} | ${escapeHtml(line.preferred_location_id || "")}</small></td><td class="number">${formatNumber(qty * Number(line.unit_weight_lbs || 0))} LB</td><td class="number">${escapeHtml(line.preferred_internal_lot_id || "")}</td><td class="number">${escapeHtml(boxes)}</td></tr>`;
+        return `<tr><td class="product">${escapeHtml(line.product?.product_name || line.product_id)}<small>${escapeHtml(line.product_id)} | ${escapeHtml(line.preferred_location_id || "")}</small></td><td class="number">${formatNumber(qty * Number(line.unit_weight_lbs || 0))} LB</td><td class="number">${escapeHtml(line.lot?.supplier_lot_number || line.preferred_internal_lot_id || "")}</td><td class="number">${escapeHtml(boxes)}</td></tr>`;
       }).join("")}</tbody></table>
       <section class="totals"><div><span>TOTAL BOXES</span><strong>${formatNumber(totals.boxes)}</strong></div><div><span>TOTAL PALLETS</span><strong>&nbsp;</strong></div><div><span>TOTAL WEIGHT</span><strong>${formatNumber(totals.weight)} LB</strong></div></section>
       <section class="signatures"><div class="line"><span>SHIPPER:</span><span>${escapeHtml(displayValue(order.ship_method || ""))}</span></div><div class="line"><span>ADDRESS:</span><span></span></div><div class="signature-row"><div class="line"><span>NAME:</span><span></span></div><div class="line"><span>DATE:</span><span></span></div></div><div class="signature-row"><div class="line"><span>SIGNATURE:</span><span></span></div><div class="line"><span>SO:</span><span>${escapeHtml(order.sales_order_id)}</span></div></div></section>
@@ -558,7 +724,7 @@ function printableDocument(title, order, lines, pickList) {
     <style>body{font-family:Arial,sans-serif;color:#17211b;margin:24px}button{padding:9px 14px;margin-bottom:18px}h1{margin:0 0 14px}.meta{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;border:1px solid #d8e1da;padding:14px;margin-bottom:18px}.meta span{color:#607064;display:block;font-size:12px;font-weight:700}.meta strong{display:block;margin-top:4px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #d8e1da;padding:8px;text-align:left}th{background:#eaf3ec}.number{text-align:right}.totals{margin:18px 0 0 auto;width:280px}.totals div{display:flex;justify-content:space-between;padding:5px}.grand{border-top:2px solid #17211b}@media print{button{display:none}body{margin:10mm}}</style>
     </head><body><button onclick="window.print()">Print ${title}</button><h1>${title} ${escapeHtml(order.sales_order_id)}</h1>
     <section class="meta"><div><span>Customer</span><strong>${escapeHtml(order.customer?.supplier_name || order.customer_name)}</strong></div><div><span>Status</span><strong>${escapeHtml(order.status)}</strong></div><div><span>Order Date</span><strong>${escapeHtml(formatDate(order.order_date))}</strong></div><div><span>Requested Date</span><strong>${escapeHtml(formatDate(order.ship_by_date))}</strong></div><div><span>Channel</span><strong>${escapeHtml(displayValue(order.channel))}</strong></div><div><span>Ship Method</span><strong>${escapeHtml(displayValue(order.ship_method))}</strong></div></section>
-    <table><thead><tr><th>Product</th><th>Lot</th><th>Location</th><th class="number">Qty</th><th>Unit</th><th class="number">Weight</th>${pickList ? "<th>Pick Status</th>" : "<th class=\"number\">Price</th><th class=\"number\">Total</th>"}</tr></thead><tbody>${lines.map((line) => `<tr><td>${escapeHtml(line.product?.product_name || line.product_id)}</td><td>${escapeHtml(line.preferred_internal_lot_id)}</td><td>${escapeHtml(line.preferred_location_id)}</td><td class="number">${formatNumber(line.qty_ordered)}</td><td>${escapeHtml(line.unit_type)}</td><td class="number">${formatNumber(line.unit_weight_lbs)} LB</td>${pickList ? `<td>${escapeHtml(line.line_status)}</td>` : `<td class="number">${money(line.unit_price)}</td><td class="number">${money(line.line_total)}</td>`}</tr>`).join("")}</tbody></table>
+    <table><thead><tr><th>Product</th><th>Lot</th><th>Location</th><th class="number">Qty</th><th>Unit</th><th class="number">Weight</th>${pickList ? "<th>Pick Status</th>" : "<th class=\"number\">Price</th><th class=\"number\">Total</th>"}</tr></thead><tbody>${lines.map((line) => `<tr><td>${escapeHtml(line.product?.product_name || line.product_id)}</td><td>${escapeHtml(line.lot?.supplier_lot_number || line.preferred_internal_lot_id)}</td><td>${escapeHtml(line.preferred_location_id)}</td><td class="number">${formatNumber(line.qty_ordered)}</td><td>${escapeHtml(line.unit_type)}</td><td class="number">${formatNumber(line.unit_weight_lbs)} LB</td>${pickList ? `<td>${escapeHtml(line.line_status)}</td>` : `<td class="number">${money(line.unit_price)}</td><td class="number">${money(line.line_total)}</td>`}</tr>`).join("")}</tbody></table>
     ${pickList ? "" : `<section class="totals"><div><span>Subtotal</span><strong>${money(order.subtotal_amount)}</strong></div><div><span>Tax</span><strong>${money(order.tax_amount)}</strong></div><div><span>Estimated Gross Profit</span><strong>${money(order.estimated_gross_profit)}</strong></div><div class="grand"><span>Total</span><strong>${money(order.total_amount)}</strong></div></section>`}</body></html>`;
 }
 
