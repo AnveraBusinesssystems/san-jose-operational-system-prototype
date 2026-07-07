@@ -148,6 +148,62 @@ function updateSalesOrderProgressAfterSend_(salesOrderId, line, pickTask, qtySen
                   raise SystemExit('Could not find recordInventoryMovement in Code.gs')
               text = text.replace(marker, send_function_block + '\n' + marker, 1)
 
+          location_status_helper = r'''
+function refreshLocationStatusAfterMovement_(lotId, locationId) {
+  const normalizedLocationId = String(locationId || "").trim();
+  if (!normalizedLocationId) return;
+
+  const data = dataTables_();
+  const snapshot = buildInventorySnapshot_(data);
+  const hasPositiveStockAtLocation = snapshot.some((row) =>
+    String(row.location_id || "") === normalizedLocationId
+    && num_(row.current_qty) > 0.0001
+  );
+
+  const lotStillHasStockAtLocation = snapshot.some((row) =>
+    String(row.internal_lot_id || "") === String(lotId || "")
+    && String(row.location_id || "") === normalizedLocationId
+    && num_(row.current_qty) > 0.0001
+  );
+
+  updateTableRecord_("LOCATIONS", "location_id", normalizedLocationId, {
+    current_status: hasPositiveStockAtLocation ? "UNAVAILABLE" : "AVAILABLE",
+    notes: hasPositiveStockAtLocation
+      ? "Inventory still occupies this location."
+      : "Auto-released after full pallet/lot removal.",
+    updated_at: nowIso_()
+  });
+
+  if (!lotStillHasStockAtLocation) {
+    updateTableRecord_("LOTS", "internal_lot_id", lotId, {
+      status: "EMPTY",
+      updated_at: nowIso_()
+    });
+  }
+}
+'''
+
+          if 'function refreshLocationStatusAfterMovement_(lotId, locationId)' not in text:
+              marker = '''function updateLotQuantityFromMovements_(lotId) {
+'''
+              if marker not in text:
+                  raise SystemExit('Could not find updateLotQuantityFromMovements_ in Code.gs')
+              text = text.replace(marker, location_status_helper + '\n' + marker, 1)
+
+          movement_before = '''  appendRecord_("INVENTORY_MOVEMENTS", movement);
+  updateLotQuantityFromMovements_(lot.internal_lot_id);
+  buildSystemBundle_(true);
+'''
+          movement_after = '''  appendRecord_("INVENTORY_MOVEMENTS", movement);
+  updateLotQuantityFromMovements_(lot.internal_lot_id);
+  refreshLocationStatusAfterMovement_(lot.internal_lot_id, locationId);
+  buildSystemBundle_(true);
+'''
+          if movement_after not in text:
+              if movement_before not in text:
+                  raise SystemExit('Could not find inventory movement save block in Code.gs')
+              text = text.replace(movement_before, movement_after, 1)
+
           path.write_text(text)
           PY
       - name: Commit Code.gs sync to professional branch
@@ -159,7 +215,7 @@ function updateSalesOrderProgressAfterSend_(salesOrderId, line, pickTask, qtySen
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add apps-script/Code.gs
-          git commit -m "Merge Send Product backend into Code.gs"
+          git commit -m "Release empty locations after outbound inventory"
           git push origin HEAD:professional-ui-refresh
 
 # Triggered manually by ChatGPT to make professional-ui-refresh Code.gs the paste-ready Apps Script source.
