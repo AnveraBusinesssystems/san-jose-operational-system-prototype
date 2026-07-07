@@ -14,7 +14,7 @@ import * as receiving from "../pages/receiving.js?v=refine1";
 import * as openingInventory from "../pages/openingInventory.js?v=qa1";
 import * as inventory from "../pages/inventory.js?v=qa1";
 import * as scanner from "../pages/scannerTest.js?v=parties1";
-import * as reports from "../pages/reports.js?v=reports-ui6";
+import * as reports from "../pages/reports.js?v=reports-ui7";
 import * as admin from "../pages/admin.js?v=pin1";
 import * as mobileHome from "../pages/mobileHome.js?v=send-ui1";
 
