@@ -1469,4 +1469,3 @@ function nextBlFolio_() {
     return "";
   }
 }
-
