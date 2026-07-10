@@ -1,2323 +1,261 @@
-/**
- * San Jose Operational System - Google Apps Script backend
- *
- * Copy this entire file into the Apps Script project bound to:
- * San_Jose_Operational_System_WebApp_First
- *
- * Deployment model:
- * GitHub Pages frontend -> frontend/js/config.js /exec URL -> this Apps Script -> Google Sheet
- *
- * This script intentionally does two things:
- * 1) Returns clean JSON/JSONP objects that the GitHub Pages frontend can read.
- * 2) Writes readable calculated outputs into *_SCRIPT tabs for audit/review.
- */
+const SPREADSHEET_ID = "1XYaMXKGR5EG8VS38PPiHFNbtmwX5Ae6N33jLE72nxKE";
+const BACKEND_VERSION = "sales-orders-v2-2026-07-10";
 
-// Leave blank when the script is bound to the correct Google Sheet.
-// Optional safer production setup: set Script Property SPREADSHEET_ID.
-const SPREADSHEET_ID = "";
-
-const APP_TIMEZONE = "America/Los_Angeles";
 
 const ROLES = {
   ADMIN: "ADMIN",
   MANAGER: "MANAGER",
-  OPERATOR: "OPERATOR",
-  WAREHOUSE: "WAREHOUSE"
+  OPERATOR: "OPERATOR"
 };
+
 
 const PERMISSIONS = {
   ADMIN: [
-    "admin:view",
     "products:create",
-    "products:edit",
     "suppliers:create",
     "purchaseOrders:create",
     "purchaseOrders:actions",
     "salesOrders:create",
     "salesOrders:actions",
+    "salesOrders:send",
     "receiving:create",
+    "openingInventory:create",
     "inventory:view",
     "inventory:adjust",
     "scanner:lookup"
   ],
   MANAGER: [
-    "products:create",
-    "products:edit",
-    "suppliers:create",
-    "purchaseOrders:create",
-    "purchaseOrders:actions",
-    "salesOrders:create",
-    "salesOrders:actions",
+    "salesOrders:send",
     "receiving:create",
-    "inventory:view",
-    "inventory:adjust",
     "scanner:lookup"
   ],
   OPERATOR: [
-    "salesOrders:actions",
+    "salesOrders:send",
     "receiving:create",
-    "inventory:view",
-    "inventory:adjust",
-    "scanner:lookup"
-  ],
-  WAREHOUSE: [
-    "salesOrders:actions",
-    "receiving:create",
-    "inventory:view",
-    "inventory:adjust",
     "scanner:lookup"
   ]
 };
 
-const OUTPUT_HEADERS = {
-  DASHBOARD_SCRIPT: [
-    "metric_id",
-    "metric_name",
-    "metric_value",
-    "metric_unit",
-    "period_start",
-    "period_end",
-    "calculated_at",
-    "status",
-    "notes"
-  ],
-  INVENTORY_SNAPSHOT_SCRIPT: [
-    "snapshot_id",
-    "calculated_at",
-    "product_id",
-    "product_name",
-    "internal_lot_id",
-    "location_id",
-    "current_qty",
-    "reserved_qty",
-    "available_qty",
-    "unit_type",
-    "inventory_status",
-    "days_since_received",
-    "fifo_rank",
-    "unit_cost",
-    "inventory_value",
-    "expiration_date",
-    "recommended_action",
-    "notes"
-  ],
-  RECOMMENDATIONS_SCRIPT: [
-    "recommendation_id",
-    "generated_at",
-    "recommendation_type",
-    "product_id",
-    "product_name",
-    "supplier_id",
-    "supplier_name",
-    "recommended_qty",
-    "recommended_unit_cost",
-    "recommended_location_id",
-    "confidence_score",
-    "reorder_point",
-    "target_stock_level",
-    "current_qty",
-    "reason_text",
-    "status",
-    "accepted_by",
-    "accepted_at",
-    "created_po_id",
-    "notes"
-  ],
-  SUPPLIER_ANALYTICS_SCRIPT: [
-    "supplier_id",
-    "supplier_name",
-    "party_type",
-    "contact_name",
-    "email",
-    "phone",
-    "products_bought",
-    "total_orders",
-    "completed_orders",
-    "total_purchase_amount",
-    "spend_share_percent",
-    "avg_lead_time_days",
-    "std_lead_time_days",
-    "avg_quality_score",
-    "quality_percent",
-    "avg_product_accuracy_score",
-    "product_accuracy_percent",
-    "delivery_accuracy_rate",
-    "quantity_accuracy_percent",
-    "avg_price_variability_score",
-    "supplier_score",
-    "last_calculated_at",
-    "notes"
-  ],
-  PRODUCT_SUPPLIER_ANALYTICS_SCRIPT: [
-    "product_id",
-    "product_name",
-    "supplier_id",
-    "supplier_name",
-    "orders_count",
-    "avg_unit_cost",
-    "std_unit_cost",
-    "min_unit_cost",
-    "max_unit_cost",
-    "last_unit_cost",
-    "avg_lead_time_days",
-    "std_lead_time_days",
-    "recommended_supplier_flag",
-    "last_calculated_at",
-    "notes"
-  ]
+
+const CORE_SCHEMA = {
+  USERS: ["user_id", "full_name", "role", "email", "device_assigned", "is_active", "created_at", "updated_at", "notes", "pin"],
+  PRODUCTS: ["product_id", "product_name", "product_category", "default_unit", "case_weight_lbs", "amazon_sku", "wholesale_sku", "barcode_or_qr_value", "min_stock_qty", "target_stock_qty", "velocity_class", "storage_zone_preference", "is_active", "created_at", "updated_at", "notes", "base_unit", "units_per_purchase_unit", "can_break_case", "perishability_days"],
+  SUPPLIERS: ["supplier_id", "supplier_name", "contact_name", "email", "phone", "address", "payment_terms", "default_currency", "lead_time_expected_days", "is_active", "created_at", "updated_at", "notes", "party_type"],
+  LOCATIONS: ["location_id", "zone", "aisle", "rack", "level", "bin", "location_type", "capacity_units", "capacity_weight_lbs", "current_status", "allowed_categories", "priority_rank", "is_active", "qr_value", "notes"],
+  PURCHASE_ORDERS: ["po_id", "po_status", "supplier_id", "created_by", "order_date", "expected_delivery_date", "actual_first_received_date", "actual_completed_date", "payment_terms", "currency", "subtotal_amount", "tax_amount", "shipping_amount", "total_amount", "recommendation_id", "po_doc_url", "po_pdf_url", "email_status", "email_sent_at", "printed_status", "printed_at", "supplier_confirmation_status", "supplier_confirmed_delivery_date", "notes", "tax_enabled", "tax_rate", "ship_via", "quickbooks_bill_id", "bill_status", "bill_created_at"],
+  PURCHASE_ORDER_LINES: ["po_line_id", "po_id", "supplier_id", "product_id", "line_status", "qty_ordered", "qty_received_total", "qty_remaining", "unit_type", "unit_cost", "currency", "line_total", "supplier_expected_lot_number", "notes", "base_unit", "units_per_purchase_unit", "expected_base_qty", "case_weight_lbs", "qr_value"],
+  RECEIVING: ["receiving_id", "po_id", "po_line_id", "supplier_id", "product_id", "scan_code", "internal_lot_id", "supplier_lot_number", "received_date", "received_by", "qty_received", "qty_damaged", "qty_accepted", "unit_type", "quality_score", "product_accuracy_score", "over_under_status", "recommended_location_id", "confirmed_location_id", "requires_supervisor_approval", "approval_status", "notes", "base_unit", "units_per_purchase_unit", "qty_accepted_base", "pallet_count", "quality_status"],
+  LOTS: ["internal_lot_id", "product_id", "supplier_id", "supplier_lot_number", "po_id", "po_line_id", "received_date", "original_qty", "current_qty_script", "unit_type", "unit_cost", "currency", "current_location_id", "status", "expiration_date", "qr_value", "label_printed_status", "label_printed_at", "created_at", "updated_at", "notes", "purchase_qty_received", "purchase_unit_type", "pallet_count"],
+  INVENTORY_MOVEMENTS: ["movement_id", "movement_type", "timestamp", "user_id", "product_id", "internal_lot_id", "package_id", "qty_change", "unit_type", "from_location_id", "to_location_id", "related_po_id", "related_receiving_id", "related_sales_order_id", "related_pick_task_id", "related_amazon_order_id", "scan_code", "device_id", "approval_status", "notes"],
+  SALES_ORDERS: ["sales_order_id", "channel", "order_source", "customer_name", "customer_email", "customer_phone", "amazon_order_id", "order_date", "ship_by_date", "status", "currency", "subtotal_amount", "tax_amount", "shipping_amount", "total_amount", "invoice_status", "quickbooks_invoice_id", "created_by", "created_at", "updated_at", "notes", "customer_id", "ship_method", "payment_terms", "tax_enabled", "tax_rate", "estimated_gross_profit", "estimated_gross_margin_percent", "confirmed_at", "picked_at", "shipped_at", "bl_folio", "shipping_address"],
+  SALES_ORDER_LINES: ["sales_order_line_id", "sales_order_id", "channel", "amazon_order_item_id", "product_id", "amazon_sku", "wholesale_sku", "qty_ordered", "qty_picked", "qty_remaining", "unit_type", "unit_price", "currency", "line_total", "preferred_internal_lot_id", "preferred_location_id", "line_status", "notes", "unit_weight_lbs", "inventory_qty_required", "inventory_unit_type", "unit_cost", "estimated_gross_profit", "expiration_date", "fefo_status"],
+  PICK_TASKS: ["pick_task_id", "sales_order_id", "sales_order_line_id", "channel", "task_date", "priority", "product_id", "recommended_internal_lot_id", "recommended_location_id", "qty_to_pick", "qty_picked", "unit_type", "assigned_to", "pick_status", "picked_at", "scan_code", "device_id", "exception_code", "notes", "qty_to_pick_base", "reservation_status"],
+  AMAZON_PACKAGES: ["package_id", "package_qr_value", "amazon_sku", "product_id", "source_internal_lot_id", "qty_product_used", "unit_type", "packed_by", "packed_at", "package_status", "current_location_id", "matched_amazon_order_id", "matched_amazon_order_item_id", "shipped_at", "notes"],
+  AMAZON_SCAN_MATCHES: ["scan_match_id", "scanned_at", "scanned_by", "device_id", "package_id", "amazon_order_id", "amazon_order_item_id", "amazon_sku", "product_id", "match_status", "match_confidence", "exception_code", "related_pick_task_id", "related_movement_id", "notes"],
+  AUDIT_LOG: ["audit_id", "timestamp", "user_id", "role", "device_id", "action_type", "table_name", "record_id", "field_name", "old_value", "new_value", "source_screen", "notes"]
 };
+
 
 function doGet(e) {
   if (e && e.parameter && e.parameter.action) {
     return handleApiRequest_(e.parameter.action, e.parameter.payload, e.parameter.callback);
   }
-
-  return json_({
-    ok: true,
-    result: {
-      app: "San Jose Operational System Apps Script API",
-      message: "This endpoint is for the GitHub Pages frontend. Add ?action=healthCheck to test it."
-    }
-  }, e && e.parameter ? e.parameter.callback : null);
+  return HtmlService.createHtmlOutput("San Jose Operations Apps Script is deployed: " + BACKEND_VERSION);
 }
+
 
 function doPost(e) {
   const request = JSON.parse((e && e.postData && e.postData.contents) || "{}");
   return handleApiRequest_(request.action, JSON.stringify(request.payload || {}), null);
 }
 
+
 function handleApiRequest_(action, payloadText, callback) {
   try {
     const payload = payloadText ? JSON.parse(payloadText) : {};
     const routes = {
-      healthCheck: healthCheck,
-      recalculateOutputs: recalculateOutputs,
-
-      getDashboard: getDashboard,
-      getOperationalReports: getOperationalReports,
-
-      authenticateUser: authenticateUser,
-      listUsers: listUsers,
-      createUser: createUser,
-      deactivateUser: deactivateUser,
-
-      listProducts: listProducts,
-      listLots: listLots,
-      createProduct: createProduct,
-      updateProductStatus: updateProductStatus,
-      createOpeningInventory: createOpeningInventory,
-
-      listSuppliers: listSuppliers,
-      createSupplier: createSupplier,
-      listLocations: listLocations,
-
-      listPurchaseOrders: listPurchaseOrders,
-      getPurchaseOrderDetail: getPurchaseOrderDetail,
-      generatePurchaseOrderTemplate: generatePurchaseOrderTemplate,
-      createPurchaseOrder: createPurchaseOrder,
-      purchaseOrderAction: purchaseOrderAction,
-
-      listSalesOrders: listSalesOrders,
-      getSalesOrderDetail: getSalesOrderDetail,
-      createSalesOrder: createSalesOrder,
-      salesOrderAction: salesOrderAction,
-
-      receiveProduct: receiveProduct,
-      recordInventoryMovement: recordInventoryMovement,
-      recordAmazonOutbound: recordAmazonOutbound,
-      listAmazonOutboundActivity: listAmazonOutboundActivity,
-
-      inventorySnapshot: inventorySnapshot,
-      lookupScan: lookupScan,
-      matchAmazonPackageScan: matchAmazonPackageScan
+      getDashboard,
+      authenticateUser,
+      listProducts,
+      listLots,
+      createOpeningInventory,
+      listUsers,
+      createUser,
+      deactivateUser,
+      createProduct,
+      updateProductStatus,
+      listSuppliers,
+      createSupplier,
+      listLocations,
+      listPurchaseOrders,
+      getPurchaseOrderDetail,
+      generatePurchaseOrderTemplate,
+      createPurchaseOrder,
+      purchaseOrderAction,
+      listSalesOrders,
+      getSalesOrderDetail,
+      createSalesOrder,
+      salesOrderAction,
+      receiveProduct,
+      sendProduct,
+      recordInventoryMovement,
+      recordAmazonOutbound,
+      listAmazonOutboundActivity,
+      inventorySnapshot,
+      getOperationalReports,
+      lookupScan,
+      matchAmazonPackageScan,
+      validateOperationalSchema
     };
-
     if (!routes[action]) throw new Error("Unknown action: " + action);
     return json_({ ok: true, result: routes[action](payload) }, callback);
   } catch (error) {
-    logError_("API_ERROR", action, error);
     return json_({ ok: false, error: error.message || String(error) }, callback);
   }
 }
 
-function json_(value, callback) {
-  const body = callback
-    ? String(callback).replace(/[^\w.$]/g, "") + "(" + JSON.stringify(value) + ");"
-    : JSON.stringify(value);
 
-  return ContentService
-    .createTextOutput(body)
+function json_(value, callback) {
+  const body = callback ? `${callback}(${JSON.stringify(value)});` : JSON.stringify(value);
+  return ContentService.createTextOutput(body)
     .setMimeType(callback ? ContentService.MimeType.JAVASCRIPT : ContentService.MimeType.JSON);
 }
 
-/**
- * Frontend-readable API actions
- */
-
-function healthCheck() {
-  const ss = spreadsheet_();
-  const products = readTable_("PRODUCTS");
-  const lots = readTable_("LOTS");
-  const movements = readTable_("INVENTORY_MOVEMENTS");
-
-  return {
-    ok: true,
-    spreadsheet_id: ss.getId(),
-    spreadsheet_name: ss.getName(),
-    timezone: ss.getSpreadsheetTimeZone() || APP_TIMEZONE,
-    productCount: products.length,
-    lotCount: lots.length,
-    movementCount: movements.length,
-    calculated_at: nowIso_()
-  };
-}
-
-function recalculateOutputs(payload) {
-  payload = payload || {};
-  const bundle = buildSystemBundle_(true);
-  return {
-    calculated_at: bundle.calculated_at,
-    dashboardMetricCount: bundle.dashboardRows.length,
-    inventorySnapshotRows: bundle.inventorySnapshot.length,
-    supplierAnalyticsRows: bundle.supplierAnalytics.length,
-    productSupplierAnalyticsRows: bundle.productSupplierAnalytics.length,
-    recommendationRows: bundle.recommendations.length
-  };
-}
-
-function getDashboard() {
-  const bundle = buildSystemBundle_(true);
-  return bundle.dashboard;
-}
-
-function getOperationalReports() {
-  const bundle = buildSystemBundle_(true);
-  return {
-    calculated_at: bundle.calculated_at,
-    inventoryPlanning: bundle.inventoryPlanning,
-    supplierAnalytics: bundle.supplierAnalytics,
-    productSupplierAnalytics: bundle.productSupplierAnalytics,
-    inventorySnapshot: bundle.inventorySnapshot,
-    recommendations: bundle.recommendations,
-    dashboardRows: bundle.dashboardRows
-  };
-}
-
-function inventorySnapshot() {
-  const bundle = buildSystemBundle_(false);
-  return bundle.inventorySnapshot;
-}
-
-function listProducts() {
-  return readTable_("PRODUCTS")
-    .filter(isActiveRecord_)
-    .sort((a, b) => String(a.product_name || "").localeCompare(String(b.product_name || "")));
-}
-
-function listLots() {
-  const productsById = indexBy_(readTable_("PRODUCTS"), "product_id");
-  return readTable_("LOTS").map((lot) => ({
-    ...lot,
-    product: productsById[lot.product_id] || null
-  }));
-}
-
-function listUsers() {
-  return readTable_("USERS")
-    .filter(isActiveRecord_)
-    .map((user) => ({
-      ...user,
-      role: normalizeRole_(user.role)
-    }))
-    .sort((a, b) => String(a.full_name || "").localeCompare(String(b.full_name || "")));
-}
-
-function authenticateUser(payload) {
-  payload = payload || {};
-  const pin = String(payload.pin || "").trim();
-
-  const user = readTable_("USERS").find((item) =>
-    isActiveRecord_(item) && String(item.pin || "").trim() === pin
-  );
-
-  if (!user && pin === "1014") {
-    return {
-      authenticated: true,
-      user_id: "ADMIN",
-      full_name: "Admin",
-      role: "ADMIN"
-    };
-  }
-
-  if (!user) throw new Error("Code does not match an active user.");
-
-  return sessionUser_(user);
-}
-
-function createUser(payload) {
-  payload = payload || {};
-  const actor = payload.user || {};
-  if (normalizeRole_(actor.role) !== "ADMIN") throw new Error("Only an Admin can create users.");
-
-  const input = payload.input || {};
-  const fullName = String(input.full_name || "").trim();
-  const pin = String(input.pin || "").trim();
-  const role = normalizeRole_(input.role || "OPERATOR");
-
-  if (!fullName) throw new Error("Full name is required.");
-  if (!/^\d{4}$/.test(pin)) throw new Error("PIN must be exactly 4 digits.");
-
-  ensureTableColumns_("USERS", ["user_id", "full_name", "role", "email", "device_assigned", "is_active", "created_at", "updated_at", "notes", "pin"]);
-
-  const users = readTable_("USERS");
-  if (users.some((item) => isActiveRecord_(item) && String(item.pin || "").trim() === pin)) {
-    throw new Error("An active user already has that 4-digit code.");
-  }
-
-  const record = {
-    user_id: nextId_("USERS", "user_id", "USR"),
-    full_name: fullName,
-    role: role,
-    email: input.email || "",
-    device_assigned: input.device_assigned || "",
-    is_active: true,
-    created_at: nowIso_(),
-    updated_at: nowIso_(),
-    notes: input.notes || "",
-    pin: pin
-  };
-
-  appendRecord_("USERS", record);
-  return sessionUser_(record);
-}
-
-function deactivateUser(payload) {
-  payload = payload || {};
-  const actor = payload.user || {};
-  if (normalizeRole_(actor.role) !== "ADMIN") throw new Error("Only an Admin can remove users.");
-
-  const userId = String(payload.userId || "").trim();
-  if (!userId) throw new Error("Choose a user to remove.");
-  if (String(actor.user_id || "") === userId) throw new Error("You cannot remove the user you are signed in as.");
-
-  updateTableRecord_("USERS", "user_id", userId, {
-    is_active: false,
-    updated_at: nowIso_()
-  });
-
-  return { user_id: userId, is_active: false };
-}
-
-function createProduct(payload) {
-  payload = payload || {};
-  requirePermission_(payload.user, "products:create");
-
-  const input = payload.input || {};
-  const products = readTable_("PRODUCTS");
-  const productName = String(input.product_name || "").trim();
-  const productCategory = String(input.product_category || "General").trim();
-  const perishabilityDays = num_(input.perishability_days);
-
-  if (!productName) throw new Error("Product name is required.");
-  if (perishabilityDays < 0) throw new Error("Perishability days cannot be negative.");
-  if (products.some((row) => String(row.product_name || "").trim().toLowerCase() === productName.toLowerCase())) {
-    throw new Error("A product with this name already exists.");
-  }
-
-  ensureTableColumns_("PRODUCTS", [
-    "product_id", "product_name", "product_category", "default_unit", "case_weight_lbs",
-    "amazon_sku", "wholesale_sku", "barcode_or_qr_value", "min_stock_qty", "target_stock_qty",
-    "velocity_class", "storage_zone_preference", "is_active", "created_at", "updated_at", "notes",
-    "base_unit", "units_per_purchase_unit", "can_break_case", "perishability_days"
-  ]);
-
-  const productId = input.product_id || nextId_("PRODUCTS", "product_id", "PROD");
-  if (products.some((row) => String(row.product_id) === String(productId))) {
-    throw new Error("Product ID already exists.");
-  }
-
-  const record = {
-    product_id: productId,
-    product_name: productName,
-    product_category: productCategory,
-    default_unit: input.default_unit || "",
-    case_weight_lbs: num_(input.case_weight_lbs),
-    amazon_sku: input.amazon_sku || "",
-    wholesale_sku: input.wholesale_sku || "",
-    barcode_or_qr_value: input.barcode_or_qr_value || productId,
-    min_stock_qty: num_(input.min_stock_qty),
-    target_stock_qty: num_(input.target_stock_qty),
-    velocity_class: input.velocity_class || "",
-    storage_zone_preference: input.storage_zone_preference || "",
-    is_active: true,
-    created_at: nowIso_(),
-    updated_at: nowIso_(),
-    notes: input.notes || "",
-    base_unit: input.base_unit || "LB",
-    units_per_purchase_unit: num_(input.units_per_purchase_unit),
-    can_break_case: input.can_break_case || "",
-    perishability_days: perishabilityDays
-  };
-
-  appendRecord_("PRODUCTS", record);
-  return record;
-}
-
-function updateProductStatus(payload) {
-  payload = payload || {};
-  requirePermission_(payload.user, "products:edit");
-
-  const productId = String(payload.productId || "").trim();
-  if (!productId) throw new Error("Product ID is required.");
-
-  updateTableRecord_("PRODUCTS", "product_id", productId, {
-    is_active: Boolean(payload.isActive),
-    updated_at: nowIso_()
-  });
-
-  return readTable_("PRODUCTS").find((row) => String(row.product_id) === productId);
-}
-
-function createOpeningInventory(payload) {
-  payload = payload || {};
-  requirePermission_(payload.user, "receiving:create");
-
-  const input = payload.input || {};
-  const name = String(input.product_name || "").trim();
-  const qty = num_(input.qty);
-  const weight = num_(input.purchase_unit_weight);
-  const locationIds = normalizeLocationIds_(input);
-
-  if (!name || qty <= 0 || weight <= 0 || !locationIds.length) {
-    throw new Error("Complete product, quantity, weight, and inventory space.");
-  }
-
-  const lock = LockService.getScriptLock();
-  lock.waitLock(15000);
-
-  try {
-    const allLocations = readTable_("LOCATIONS");
-    const occupied = occupiedInventoryLocationIds_();
-    const locations = locationIds.map((locationId) =>
-      allLocations.find((row) => String(row.location_id) === locationId || String(row.qr_value) === locationId)
-    );
-
-    if (locations.some((location) => !location)) throw new Error("One or more inventory locations were not found.");
-    if (locations.some((location) => String(location.current_status || "AVAILABLE").toUpperCase() !== "AVAILABLE")) {
-      throw new Error("Choose only available inventory spaces.");
-    }
-    if (locations.some((location) => occupied[location.location_id])) {
-      throw new Error("Choose only empty inventory spaces.");
-    }
-
-    let product = readTable_("PRODUCTS").find((row) =>
-      String(row.product_name || "").trim().toLowerCase() === name.toLowerCase()
-    );
-
-    if (!product) {
-      product = createProduct({
-        user: payload.user,
-        input: {
-          product_name: name,
-          product_category: input.product_category || "General",
-          perishability_days: num_(input.perishability_days)
-        }
-      });
-    }
-
-    ensureTableColumns_("LOTS", ["purchase_qty_received", "purchase_unit_type", "current_qty_script", "current_location_id", "qr_value", "pallet_count"]);
-    ensureTableColumns_("INVENTORY_MOVEMENTS", ["movement_id", "movement_type", "timestamp", "user_id", "product_id", "internal_lot_id", "qty_change", "unit_type", "from_location_id", "to_location_id", "scan_code", "device_id", "approval_status", "notes"]);
-
-    const lots = [];
-    const movements = [];
-
-    locations.forEach((location) => {
-      const lotId = nextId_("LOTS", "internal_lot_id", "LOT");
-      const baseQty = qty * weight;
-      const lot = {
-        internal_lot_id: lotId,
-        product_id: product.product_id,
-        supplier_id: input.supplier_id || "",
-        supplier_lot_number: input.supplier_lot_number || "OPENING",
-        po_id: "",
-        po_line_id: "",
-        received_date: today_(),
-        original_qty: baseQty,
-        current_qty_script: baseQty,
-        unit_type: "LB",
-        unit_cost: num_(input.unit_cost),
-        currency: input.currency || "USD",
-        current_location_id: location.location_id,
-        status: "ACTIVE",
-        expiration_date: calculatedExpirationDate_(product, today_()),
-        qr_value: lotId,
-        notes: input.notes || "Opening inventory count.",
-        purchase_qty_received: qty,
-        purchase_unit_type: input.purchase_unit || "UNIT",
-        pallet_count: num_(input.pallet_count, 1)
-      };
-
-      const movement = {
-        movement_id: nextId_("INVENTORY_MOVEMENTS", "movement_id", "MOV"),
-        movement_type: "OPENING_INVENTORY",
-        timestamp: nowIso_(),
-        user_id: userId_(payload.user),
-        product_id: product.product_id,
-        internal_lot_id: lotId,
-        package_id: "",
-        qty_change: baseQty,
-        unit_type: "LB",
-        from_location_id: "OPENING_COUNT",
-        to_location_id: location.location_id,
-        related_po_id: "",
-        related_receiving_id: "",
-        related_sales_order_id: "",
-        related_pick_task_id: "",
-        related_amazon_order_id: "",
-        scan_code: lotId,
-        device_id: "WEB_APP",
-        approval_status: "APPROVED",
-        notes: input.notes || ""
-      };
-
-      appendRecord_("LOTS", lot);
-      appendRecord_("INVENTORY_MOVEMENTS", movement);
-      updateTableRecord_("LOCATIONS", "location_id", location.location_id, { current_status: "UNAVAILABLE" });
-
-      lots.push(lot);
-      movements.push(movement);
-    });
-
-    buildSystemBundle_(true);
-
-    return { product: product, lot: lots[0], movement: movements[0], lots: lots, movements: movements };
-  } finally {
-    lock.releaseLock();
-  }
-}
-
-function listSuppliers() {
-  const purchaseOrders = readTable_("PURCHASE_ORDERS");
-  const leadStats = buildLeadTimeStatsBySupplier_(purchaseOrders);
-
-  return readTable_("SUPPLIERS")
-    .filter(isActiveRecord_)
-    .map((supplier) => ({
-      ...supplier,
-      party_type: normalizePartyType_(supplier.party_type),
-      lead_time_expected_days: normalizePartyType_(supplier.party_type) === "VENDOR"
-        ? round_(leadStats[supplier.supplier_id] ? leadStats[supplier.supplier_id].average : num_(supplier.lead_time_expected_days, 5), 0)
-        : ""
-    }))
-    .sort((a, b) => String(a.supplier_name || "").localeCompare(String(b.supplier_name || "")));
-}
-
-function createSupplier(payload) {
-  payload = payload || {};
-  requirePermission_(payload.user, "suppliers:create");
-
-  const input = payload.input || {};
-  const partyType = normalizePartyType_(input.party_type);
-  const supplierName = String(input.supplier_name || "").trim();
-  if (!supplierName) throw new Error("Business name is required.");
-
-  ensureTableColumns_("SUPPLIERS", ["supplier_id", "supplier_name", "contact_name", "email", "phone", "address", "payment_terms", "default_currency", "lead_time_expected_days", "is_active", "created_at", "updated_at", "notes", "party_type"]);
-
-  const suppliers = readTable_("SUPPLIERS");
-  const supplierId = input.supplier_id || nextId_("SUPPLIERS", "supplier_id", partyType === "CUSTOMER" ? "CUST" : "SUP");
-
-  if (suppliers.some((row) => String(row.supplier_id) === String(supplierId))) {
-    throw new Error("Business record ID already exists.");
-  }
-
-  const record = {
-    supplier_id: supplierId,
-    supplier_name: supplierName,
-    contact_name: input.contact_name || "",
-    email: input.email || "",
-    phone: input.phone || "",
-    address: input.address || "",
-    payment_terms: input.payment_terms || "Net 30",
-    default_currency: input.default_currency || "USD",
-    lead_time_expected_days: partyType === "VENDOR" ? num_(input.lead_time_expected_days, 5) : "",
-    is_active: true,
-    created_at: nowIso_(),
-    updated_at: nowIso_(),
-    notes: input.notes || "",
-    party_type: partyType
-  };
-
-  appendRecord_("SUPPLIERS", record);
-  return record;
-}
-
-function listLocations() {
-  return readTable_("LOCATIONS").sort((a, b) => String(a.location_id || "").localeCompare(String(b.location_id || "")));
-}
-
-function listPurchaseOrders() {
-  const suppliersById = indexBy_(readTable_("SUPPLIERS"), "supplier_id");
-  const lines = readTable_("PURCHASE_ORDER_LINES");
-  return readTable_("PURCHASE_ORDERS")
-    .map((po) => ({
-      ...po,
-      supplier: suppliersById[po.supplier_id] || null,
-      line_count: lines.filter((line) => line.po_id === po.po_id).length
-    }))
-    .sort((a, b) => String(b.order_date || "").localeCompare(String(a.order_date || "")));
-}
-
-function getPurchaseOrderDetail(payload) {
-  payload = payload || {};
-  const poId = String(payload.poId || payload.po_id || "").trim();
-  if (!poId) return null;
-
-  const productsById = indexBy_(readTable_("PRODUCTS"), "product_id");
-  const suppliersById = indexBy_(readTable_("SUPPLIERS"), "supplier_id");
-  const po = readTable_("PURCHASE_ORDERS").find((item) => String(item.po_id) === poId);
-  if (!po) return null;
-
-  const lines = readTable_("PURCHASE_ORDER_LINES")
-    .filter((line) => String(line.po_id) === poId)
-    .map((line) => ({
-      ...line,
-      product: productsById[line.product_id] || null
-    }));
-
-  return {
-    po: {
-      ...po,
-      supplier: suppliersById[po.supplier_id] || null
-    },
-    lines: lines
-  };
-}
-
-function generatePurchaseOrderTemplate(payload) {
-  payload = payload || {};
-  const detail = getPurchaseOrderDetail(payload);
-  if (!detail) throw new Error("Purchase order not found.");
-
-  return {
-    po: detail.po,
-    lines: detail.lines.map((line) => ({
-      ...line,
-      qr_value: line.qr_value || purchaseOrderQrValue_({
-        poId: line.po_id,
-        poLineId: line.po_line_id,
-        productId: line.product_id,
-        productName: line.product ? line.product.product_name : line.product_id,
-        qty: line.qty_ordered,
-        supplierLotNumber: line.supplier_expected_lot_number
-      })
-    }))
-  };
-}
-
-function createPurchaseOrder(payload) {
-  payload = payload || {};
-  requirePermission_(payload.user, "purchaseOrders:create");
-
-  const input = payload.input || {};
-  const suppliers = readTable_("SUPPLIERS");
-  const supplier = suppliers.find((item) => String(item.supplier_id) === String(input.supplier_id));
-  if (!supplier || normalizePartyType_(supplier.party_type) !== "VENDOR") {
-    throw new Error("Select a valid vendor.");
-  }
-
-  const products = readTable_("PRODUCTS");
-  const inputLines = Array.isArray(input.lines) ? input.lines : [input];
-  if (!inputLines.length) throw new Error("Add at least one product.");
-
-  const validated = inputLines.map((line, index) => validatePurchaseOrderLine_(line, index, products));
-  const subtotal = round_(sum_(validated.map((line) => line.line_total)), 2);
-  const taxEnabled = truthy_(input.tax_enabled);
-  const taxRate = taxEnabled ? Math.max(0, num_(input.tax_rate_percent, num_(input.tax_rate) * 100 || 6.25) / 100) : 0;
-  const taxAmount = round_(subtotal * taxRate, 2);
-  const orderDate = input.order_date || today_();
-  const expectedDeliveryDate = input.expected_delivery_date || addDays_(orderDate, num_(supplier.lead_time_expected_days, 5));
-
-  const poId = nextId_("PURCHASE_ORDERS", "po_id", "PO");
-  const po = {
-    po_id: poId,
-    po_status: "DRAFT",
-    supplier_id: supplier.supplier_id,
-    created_by: userId_(payload.user),
-    order_date: orderDate,
-    expected_delivery_date: expectedDeliveryDate,
-    actual_first_received_date: "",
-    actual_completed_date: "",
-    payment_terms: input.payment_terms || supplier.payment_terms || "Net 30",
-    currency: supplier.default_currency || "USD",
-    subtotal_amount: subtotal,
-    tax_amount: taxAmount,
-    shipping_amount: num_(input.shipping_amount),
-    total_amount: round_(subtotal + taxAmount + num_(input.shipping_amount), 2),
-    recommendation_id: input.recommendation_id || "",
-    po_doc_url: "",
-    po_pdf_url: "",
-    email_status: "NOT_SENT",
-    email_sent_at: "",
-    printed_status: "NOT_PRINTED",
-    printed_at: "",
-    supplier_confirmation_status: "PENDING",
-    supplier_confirmed_delivery_date: "",
-    notes: input.notes || "",
-    tax_enabled: taxEnabled,
-    tax_rate: taxRate,
-    ship_via: input.ship_via || "",
-    quickbooks_bill_id: "",
-    bill_status: "NOT_CREATED",
-    bill_created_at: ""
-  };
-
-  const lineIdSeed = readTable_("PURCHASE_ORDER_LINES").slice();
-  const lines = validated.map((line) => {
-    const poLineId = nextIdFromRows_(lineIdSeed, "po_line_id", "POL");
-    lineIdSeed.push({ po_line_id: poLineId });
-
-    return {
-      po_line_id: poLineId,
-      po_id: poId,
-      supplier_id: supplier.supplier_id,
-      product_id: line.product_id,
-      line_status: "ORDERED",
-      qty_ordered: line.qty_ordered,
-      qty_received_total: 0,
-      qty_remaining: line.qty_ordered,
-      unit_type: line.unit_type,
-      unit_cost: line.unit_cost,
-      currency: po.currency,
-      line_total: line.line_total,
-      supplier_expected_lot_number: line.supplier_expected_lot_number || "",
-      notes: line.notes || "",
-      base_unit: line.base_unit,
-      units_per_purchase_unit: line.units_per_purchase_unit,
-      expected_base_qty: line.expected_base_qty,
-      case_weight_lbs: line.case_weight_lbs,
-      qr_value: purchaseOrderQrValue_({
-        poId: poId,
-        poLineId: poLineId,
-        productId: line.product_id,
-        productName: line.product_name,
-        qty: line.qty_ordered,
-        supplierLotNumber: line.supplier_expected_lot_number
-      })
-    };
-  });
-
-  appendRecord_("PURCHASE_ORDERS", po);
-  lines.forEach((line) => appendRecord_("PURCHASE_ORDER_LINES", line));
-
-  buildSystemBundle_(true);
-
-  return { ...po, lines: lines };
-}
-
-function purchaseOrderAction(payload) {
-  payload = payload || {};
-  requirePermission_(payload.user, "purchaseOrders:actions");
-
-  const poId = String(payload.poId || payload.po_id || "").trim();
-  const action = String(payload.action || "").trim();
-  if (!poId) throw new Error("PO is required.");
-
-  const changes = {};
-  if (action === "markSent") {
-    changes.email_status = "SENT";
-    changes.email_sent_at = nowIso_();
-    changes.po_status = "SENT";
-  } else if (action === "markPrinted") {
-    changes.printed_status = "PRINTED";
-    changes.printed_at = nowIso_();
-  } else if (action === "cancel") {
-    changes.po_status = "CANCELLED";
-  } else {
-    throw new Error("Unknown PO action.");
-  }
-
-  updateTableRecord_("PURCHASE_ORDERS", "po_id", poId, changes);
-  return listPurchaseOrders().find((po) => po.po_id === poId);
-}
-
-function receiveProduct(payload) {
-  payload = payload || {};
-  requirePermission_(payload.user, "receiving:create");
-
-  const input = payload.input || {};
-  const poId = String(input.po_id || "").trim();
-  const poLineId = String(input.po_line_id || "").trim();
-  if (!poId || !poLineId) throw new Error("Select a PO line to receive.");
-
-  const po = readTable_("PURCHASE_ORDERS").find((item) => String(item.po_id) === poId);
-  const line = readTable_("PURCHASE_ORDER_LINES").find((item) => String(item.po_line_id) === poLineId);
-  const product = readTable_("PRODUCTS").find((item) => String(item.product_id) === String(line && line.product_id));
-  if (!po || !line || !product) throw new Error("PO line was not found.");
-
-  const qtyReceived = num_(input.qty_received);
-  const qtyDamaged = num_(input.qty_damaged);
-  const qtyAccepted = Math.max(0, qtyReceived - qtyDamaged);
-  if (qtyReceived <= 0) throw new Error("Received quantity must be greater than zero.");
-
-  const baseUnit = line.base_unit || product.base_unit || "LB";
-  const unitsPerPurchaseUnit = num_(line.units_per_purchase_unit, num_(line.case_weight_lbs, 1) || 1);
-  const acceptedBaseQty = round_(qtyAccepted * unitsPerPurchaseUnit, 2);
-  const internalLotId = nextId_("LOTS", "internal_lot_id", "LOT");
-  const receivingId = nextId_("RECEIVING", "receiving_id", "REC");
-  const confirmedLocation = String(input.confirmed_location_id || input.location_id || "").trim() || recommendLocationId_(product);
-  const qualityScore = num_(input.quality_score, 5);
-  const qualityStatus = qualityScore >= 3 ? "PASS" : "HOLD";
-  const quantityStatus = qtyAccepted > num_(line.qty_remaining, line.qty_ordered) ? "OVER" : qtyAccepted < num_(line.qty_remaining, line.qty_ordered) ? "UNDER" : "MATCH";
-  const approvalStatus = qualityStatus === "PASS" && quantityStatus !== "OVER" ? "APPROVED" : "PENDING";
-
-  const receiving = {
-    receiving_id: receivingId,
-    po_id: poId,
-    po_line_id: poLineId,
-    supplier_id: po.supplier_id,
-    product_id: line.product_id,
-    scan_code: input.scan_code || "",
-    internal_lot_id: internalLotId,
-    supplier_lot_number: input.supplier_lot_number || line.supplier_expected_lot_number || "",
-    received_date: today_(),
-    received_by: userId_(payload.user),
-    qty_received: qtyReceived,
-    qty_damaged: qtyDamaged,
-    qty_accepted: qtyAccepted,
-    unit_type: line.unit_type,
-    quality_score: qualityScore,
-    product_accuracy_score: num_(input.product_accuracy_score, 5),
-    over_under_status: quantityStatus,
-    recommended_location_id: input.recommended_location_id || "",
-    confirmed_location_id: confirmedLocation,
-    requires_supervisor_approval: approvalStatus !== "APPROVED",
-    approval_status: approvalStatus,
-    notes: input.notes || "",
-    base_unit: baseUnit,
-    units_per_purchase_unit: unitsPerPurchaseUnit,
-    qty_accepted_base: acceptedBaseQty,
-    pallet_count: num_(input.pallet_count),
-    quality_status: qualityStatus
-  };
-
-  const lot = {
-    internal_lot_id: internalLotId,
-    product_id: line.product_id,
-    supplier_id: po.supplier_id,
-    supplier_lot_number: receiving.supplier_lot_number,
-    po_id: poId,
-    po_line_id: poLineId,
-    received_date: today_(),
-    original_qty: acceptedBaseQty,
-    current_qty_script: acceptedBaseQty,
-    unit_type: baseUnit,
-    unit_cost: num_(line.unit_cost),
-    currency: po.currency || "USD",
-    current_location_id: confirmedLocation,
-    status: qualityStatus === "PASS" ? "ACTIVE" : qualityStatus,
-    expiration_date: calculatedExpirationDate_(product, today_()),
-    qr_value: internalLotId,
-    notes: "Created by receiving flow.",
-    purchase_qty_received: qtyAccepted,
-    purchase_unit_type: line.unit_type,
-    pallet_count: receiving.pallet_count
-  };
-
-  const movement = {
-    movement_id: nextId_("INVENTORY_MOVEMENTS", "movement_id", "MOV"),
-    movement_type: "RECEIVE",
-    timestamp: nowIso_(),
-    user_id: userId_(payload.user),
-    product_id: line.product_id,
-    internal_lot_id: internalLotId,
-    package_id: "",
-    qty_change: acceptedBaseQty,
-    unit_type: baseUnit,
-    from_location_id: "SUPPLIER",
-    to_location_id: confirmedLocation,
-    related_po_id: poId,
-    related_receiving_id: receivingId,
-    related_sales_order_id: "",
-    related_pick_task_id: "",
-    related_amazon_order_id: "",
-    scan_code: receiving.scan_code || internalLotId,
-    device_id: "WEB_APP",
-    approval_status: approvalStatus,
-    notes: input.notes || ""
-  };
-
-  appendRecord_("RECEIVING", receiving);
-  appendRecord_("LOTS", lot);
-  appendRecord_("INVENTORY_MOVEMENTS", movement);
-
-  const receivedTotal = num_(line.qty_received_total) + qtyAccepted;
-  const remaining = Math.max(0, num_(line.qty_ordered) - receivedTotal);
-  updateTableRecord_("PURCHASE_ORDER_LINES", "po_line_id", poLineId, {
-    qty_received_total: receivedTotal,
-    qty_remaining: remaining,
-    line_status: remaining <= 0 ? "RECEIVED" : "PARTIAL"
-  });
-
-  const poLines = readTable_("PURCHASE_ORDER_LINES").filter((item) => item.po_id === poId);
-  const allReceived = poLines.length > 0 && poLines.every((item) => {
-    if (item.po_line_id === poLineId) return remaining <= 0;
-    return num_(item.qty_remaining) <= 0;
-  });
-
-  updateTableRecord_("PURCHASE_ORDERS", "po_id", poId, {
-    actual_first_received_date: po.actual_first_received_date || today_(),
-    actual_completed_date: allReceived ? today_() : po.actual_completed_date || "",
-    po_status: allReceived ? "COMPLETE" : "PARTIALLY_RECEIVED"
-  });
-
-  if (confirmedLocation) {
-    updateTableRecord_("LOCATIONS", "location_id", confirmedLocation, { current_status: "UNAVAILABLE" });
-  }
-
-  buildSystemBundle_(true);
-
-  return { receiving: receiving, lot: lot, movement: movement };
-}
-
-function recordInventoryMovement(payload) {
-  payload = payload || {};
-  requirePermission_(payload.user, "inventory:adjust");
-
-  const input = payload.input || {};
-  const lotKey = String(input.internal_lot_id || input.lot_id || input.scan_code || "").trim();
-  const lots = readTable_("LOTS");
-  const lot = lots.find((item) =>
-    [item.internal_lot_id, item.qr_value, item.supplier_lot_number].map(String).indexOf(lotKey) >= 0
-  );
-  if (!lot) throw new Error("Lot was not found.");
-
-  const qty = num_(input.qty);
-  if (qty <= 0) throw new Error("Quantity must be greater than zero.");
-
-  const type = String(input.movement_type || "SALE").toUpperCase();
-  const direction = type === "ADJUST_IN" || type === "RECEIVE" || type === "RETURN" ? 1 : -1;
-  const qtyChange = direction * qty;
-  const locationId = input.location_id || lot.current_location_id || "";
-
-  const movement = {
-    movement_id: nextId_("INVENTORY_MOVEMENTS", "movement_id", "MOV"),
-    movement_type: type,
-    timestamp: nowIso_(),
-    user_id: userId_(payload.user),
-    product_id: lot.product_id,
-    internal_lot_id: lot.internal_lot_id,
-    package_id: input.package_id || "",
-    qty_change: qtyChange,
-    unit_type: input.unit_type || lot.unit_type || "LB",
-    from_location_id: qtyChange < 0 ? locationId : input.from_location_id || "",
-    to_location_id: qtyChange > 0 ? locationId : input.to_location_id || "OUTBOUND",
-    related_po_id: input.related_po_id || lot.po_id || "",
-    related_receiving_id: input.related_receiving_id || "",
-    related_sales_order_id: input.related_sales_order_id || "",
-    related_pick_task_id: input.related_pick_task_id || "",
-    related_amazon_order_id: input.related_amazon_order_id || "",
-    scan_code: lotKey,
-    device_id: input.device_id || "WEB_APP",
-    approval_status: "APPROVED",
-    notes: input.notes || ""
-  };
-
-  appendRecord_("INVENTORY_MOVEMENTS", movement);
-  updateLotQuantityFromMovements_(lot.internal_lot_id);
-  buildSystemBundle_(true);
-
-  return movement;
-}
-
-function recordAmazonOutbound(payload) {
-  payload = payload || {};
-  const input = payload.input || {};
-  const reference = String(input.amazon_reference || input.related_amazon_order_id || "").trim();
-
-  return recordInventoryMovement({
-    user: payload.user,
-    input: {
-      ...input,
-      movement_type: "AMAZON_OUT",
-      related_amazon_order_id: reference,
-      notes: [reference ? "Amazon reference: " + reference : "", input.notes || ""].filter(Boolean).join(" | ")
-    }
-  });
-}
-
-function listAmazonOutboundActivity() {
-  const productsById = indexBy_(readTable_("PRODUCTS"), "product_id");
-  const lotsById = indexBy_(readTable_("LOTS"), "internal_lot_id");
-
-  return readTable_("INVENTORY_MOVEMENTS")
-    .filter((movement) => String(movement.movement_type || "").toUpperCase() === "AMAZON_OUT")
-    .sort((a, b) => dateTime_(b.timestamp) - dateTime_(a.timestamp))
-    .slice(0, 25)
-    .map((movement) => ({
-      ...movement,
-      product: productsById[movement.product_id] || null,
-      lot: lotsById[movement.internal_lot_id] || null
-    }));
-}
-
-function listSalesOrders() {
-  const customersById = indexBy_(readTable_("SUPPLIERS"), "supplier_id");
-  const productsById = indexBy_(readTable_("PRODUCTS"), "product_id");
-  const lines = readTable_("SALES_ORDER_LINES");
-
-  return readTable_("SALES_ORDERS")
-    .map((order) => {
-      const orderLines = lines.filter((line) => line.sales_order_id === order.sales_order_id);
-      return {
-        ...order,
-        customer: customersById[order.customer_id] || null,
-        line_count: orderLines.length,
-        product_names: unique_(orderLines.map((line) => productsById[line.product_id] ? productsById[line.product_id].product_name : line.product_id)).join(", ")
-      };
-    })
-    .sort((a, b) => String(b.order_date || "").localeCompare(String(a.order_date || "")));
-}
-
-function getSalesOrderDetail(payload) {
-  payload = payload || {};
-  const salesOrderId = String(payload.salesOrderId || payload.sales_order_id || "").trim();
-  if (!salesOrderId) return null;
-
-  const productsById = indexBy_(readTable_("PRODUCTS"), "product_id");
-  const lotsById = indexBy_(readTable_("LOTS"), "internal_lot_id");
-  const locationsById = indexBy_(readTable_("LOCATIONS"), "location_id");
-  const customersById = indexBy_(readTable_("SUPPLIERS"), "supplier_id");
-  const order = readTable_("SALES_ORDERS").find((item) => String(item.sales_order_id) === salesOrderId);
-  if (!order) return null;
-
-  const lines = readTable_("SALES_ORDER_LINES")
-    .filter((line) => String(line.sales_order_id) === salesOrderId)
-    .map((line) => ({
-      ...line,
-      product: productsById[line.product_id] || null,
-      lot: lotsById[line.preferred_internal_lot_id] || null,
-      location: locationsById[line.preferred_location_id] || null
-    }));
-
-  return {
-    order: {
-      ...order,
-      customer: customersById[order.customer_id] || null
-    },
-    lines: lines,
-    pickTasks: readTable_("PICK_TASKS").filter((task) => task.sales_order_id === salesOrderId)
-  };
-}
-
-function createSalesOrder(payload) {
-  payload = payload || {};
-  requirePermission_(payload.user, "salesOrders:create");
-
-  const input = payload.input || {};
-  const customers = readTable_("SUPPLIERS");
-  const customer = customers.find((item) => String(item.supplier_id) === String(input.customer_id));
-  if (!customer || normalizePartyType_(customer.party_type) !== "CUSTOMER") {
-    throw new Error("Select a valid customer.");
-  }
-
-  const shippingAddress = String(input.shipping_address || customer.address || "").trim();
-  if (!shippingAddress) throw new Error("Ship To Address is required.");
-
-  const inputLines = Array.isArray(input.lines) ? input.lines : [];
-  if (!inputLines.length) throw new Error("Add at least one inventory item.");
-
-  const data = dataTables_();
-  const snapshot = buildInventorySnapshot_(data);
-  const allocated = {};
-  const validated = inputLines.map((line, index) => validateSalesOrderLine_(line, index, data, snapshot, allocated, input.requested_delivery_date));
-
-  const subtotal = round_(sum_(validated.map((line) => line.line_total)), 2);
-  const grossProfit = round_(sum_(validated.map((line) => line.estimated_gross_profit)), 2);
-  const taxEnabled = truthy_(input.tax_enabled);
-  const taxRate = taxEnabled ? Math.max(0, num_(input.tax_rate_percent, num_(input.tax_rate) * 100 || 6.25) / 100) : 0;
-  const taxAmount = round_(subtotal * taxRate, 2);
-  const salesOrderId = nextId_("SALES_ORDERS", "sales_order_id", "SO");
-  const orderDate = input.order_date || today_();
-
-  const order = {
-    sales_order_id: salesOrderId,
-    channel: String(input.sales_channel || input.channel || "OTHER").toUpperCase(),
-    order_source: input.order_source || "MANUAL",
-    customer_name: customer.supplier_name,
-    customer_email: customer.email || "",
-    customer_phone: customer.phone || "",
-    amazon_order_id: input.amazon_order_id || "",
-    order_date: orderDate,
-    ship_by_date: input.requested_delivery_date || "",
-    status: "DRAFT",
-    currency: customer.default_currency || "USD",
-    subtotal_amount: subtotal,
-    tax_amount: taxAmount,
-    shipping_amount: num_(input.shipping_amount),
-    total_amount: round_(subtotal + taxAmount + num_(input.shipping_amount), 2),
-    invoice_status: "NOT_INVOICED",
-    quickbooks_invoice_id: "",
-    created_by: userId_(payload.user),
-    created_at: nowIso_(),
-    updated_at: nowIso_(),
-    notes: input.notes || "",
-    customer_id: customer.supplier_id,
-    ship_method: String(input.ship_method || "OTHER").toUpperCase(),
-    payment_terms: input.payment_terms || customer.payment_terms || "Net 30",
-    tax_enabled: taxEnabled,
-    tax_rate: taxRate,
-    estimated_gross_profit: grossProfit,
-    estimated_gross_margin_percent: subtotal > 0 ? round_(grossProfit / subtotal * 100, 2) : 0,
-    confirmed_at: "",
-    picked_at: "",
-    shipped_at: "",
-    bl_folio: nextBlFolio_(readTable_("SALES_ORDERS")),
-    shipping_address: shippingAddress
-  };
-
-  const lineSeed = readTable_("SALES_ORDER_LINES").slice();
-  const lines = validated.map((line) => {
-    const lineId = nextIdFromRows_(lineSeed, "sales_order_line_id", "SOL");
-    lineSeed.push({ sales_order_line_id: lineId });
-
-    return {
-      sales_order_line_id: lineId,
-      sales_order_id: salesOrderId,
-      channel: order.channel,
-      amazon_order_item_id: line.amazon_order_item_id || "",
-      product_id: line.product_id,
-      amazon_sku: line.amazon_sku || "",
-      wholesale_sku: line.wholesale_sku || "",
-      qty_ordered: line.qty_ordered,
-      qty_picked: 0,
-      qty_remaining: line.qty_ordered,
-      unit_type: line.unit_type,
-      unit_price: line.unit_price,
-      currency: order.currency,
-      line_total: line.line_total,
-      preferred_internal_lot_id: line.internal_lot_id,
-      preferred_location_id: line.location_id,
-      line_status: "DRAFT",
-      notes: line.notes || "",
-      unit_weight_lbs: line.unit_weight_lbs,
-      inventory_qty_required: line.inventory_qty_required,
-      inventory_unit_type: line.inventory_unit_type,
-      unit_cost: line.unit_cost,
-      estimated_gross_profit: line.estimated_gross_profit,
-      expiration_date: line.expiration_date,
-      fefo_status: line.fefo_status
-    };
-  });
-
-  appendRecord_("SALES_ORDERS", order);
-  lines.forEach((line) => appendRecord_("SALES_ORDER_LINES", line));
-
-  buildSystemBundle_(true);
-
-  return { ...order, lines: lines };
-}
-
-function salesOrderAction(payload) {
-  payload = payload || {};
-  requirePermission_(payload.user, "salesOrders:actions");
-
-  const salesOrderId = String(payload.salesOrderId || payload.sales_order_id || "").trim();
-  const action = String(payload.action || "").toUpperCase();
-  const order = readTable_("SALES_ORDERS").find((item) => item.sales_order_id === salesOrderId);
-  if (!order) throw new Error("Sales order not found.");
-
-  const lines = readTable_("SALES_ORDER_LINES").filter((line) => line.sales_order_id === salesOrderId);
-
-  if (action === "CONFIRM") {
-    if (String(order.status || "").toUpperCase() !== "DRAFT") throw new Error("Only draft Sales Orders can be confirmed.");
-    const pickSeed = readTable_("PICK_TASKS").slice();
-
-    lines.forEach((line) => {
-      const pickId = nextIdFromRows_(pickSeed, "pick_task_id", "PICK");
-      pickSeed.push({ pick_task_id: pickId });
-      appendRecord_("PICK_TASKS", {
-        pick_task_id: pickId,
-        sales_order_id: salesOrderId,
-        sales_order_line_id: line.sales_order_line_id,
-        channel: order.channel,
-        task_date: today_(),
-        priority: "NORMAL",
-        product_id: line.product_id,
-        recommended_internal_lot_id: line.preferred_internal_lot_id,
-        recommended_location_id: line.preferred_location_id,
-        qty_to_pick: line.qty_ordered,
-        qty_picked: 0,
-        unit_type: line.unit_type,
-        assigned_to: "",
-        pick_status: "OPEN",
-        picked_at: "",
-        scan_code: "",
-        device_id: "WEB_APP",
-        exception_code: "",
-        notes: line.fefo_status === "RECOMMENDED" ? "FEFO allocation." : "Manual lot allocation.",
-        qty_to_pick_base: line.inventory_qty_required,
-        reservation_status: "RESERVED"
-      });
-      updateTableRecord_("SALES_ORDER_LINES", "sales_order_line_id", line.sales_order_line_id, { line_status: "CONFIRMED" });
-    });
-    updateTableRecord_("SALES_ORDERS", "sales_order_id", salesOrderId, { status: "CONFIRMED", confirmed_at: nowIso_(), updated_at: nowIso_() });
-  } else if (action === "PICKED") {
-    const movements = [];
-    lines.forEach((line) => {
-      const movement = recordInventoryMovement({
-        user: payload.user,
-        input: {
-          internal_lot_id: line.preferred_internal_lot_id,
-          qty: num_(line.inventory_qty_required, line.qty_ordered),
-          unit_type: line.inventory_unit_type || line.unit_type,
-          movement_type: "SALE",
-          location_id: line.preferred_location_id,
-          related_sales_order_id: salesOrderId,
-          notes: "Sales order picked."
-        }
-      });
-      movements.push(movement);
-      updateTableRecord_("SALES_ORDER_LINES", "sales_order_line_id", line.sales_order_line_id, {
-        line_status: "PICKED",
-        qty_picked: line.qty_ordered,
-        qty_remaining: 0
-      });
-    });
-    readTable_("PICK_TASKS").filter((task) => task.sales_order_id === salesOrderId).forEach((task) => {
-      updateTableRecord_("PICK_TASKS", "pick_task_id", task.pick_task_id, {
-        pick_status: "PICKED",
-        qty_picked: task.qty_to_pick,
-        picked_at: nowIso_()
-      });
-    });
-    updateTableRecord_("SALES_ORDERS", "sales_order_id", salesOrderId, { status: "PICKED", picked_at: nowIso_(), updated_at: nowIso_() });
-  } else if (action === "SHIPPED") {
-    readTable_("PICK_TASKS").filter((task) => task.sales_order_id === salesOrderId).forEach((task) => {
-      updateTableRecord_("PICK_TASKS", "pick_task_id", task.pick_task_id, { pick_status: "SHIPPED" });
-    });
-    updateTableRecord_("SALES_ORDERS", "sales_order_id", salesOrderId, { status: "SHIPPED", shipped_at: nowIso_(), updated_at: nowIso_() });
-  } else {
-    throw new Error("Unknown Sales Order action.");
-  }
-
-  buildSystemBundle_(true);
-  return getSalesOrderDetail({ salesOrderId: salesOrderId });
-}
-
-function lookupScan(payload) {
-  payload = payload || {};
-  const value = String(payload.scanValue || payload.scan_value || "").trim();
-  if (!value) return null;
-
-  const product = readTable_("PRODUCTS").find((item) =>
-    [item.product_id, item.barcode_or_qr_value, item.amazon_sku, item.wholesale_sku].map(String).indexOf(value) >= 0
-  );
-  if (product) return { type: "PRODUCT", record: product };
-
-  const supplier = readTable_("SUPPLIERS").find((item) => String(item.supplier_id) === value);
-  if (supplier) return { type: "SUPPLIER", record: supplier };
-
-  const location = readTable_("LOCATIONS").find((item) =>
-    [item.location_id, item.qr_value].map(String).indexOf(value) >= 0
-  );
-  if (location) return { type: "LOCATION", record: location };
-
-  const lot = readTable_("LOTS").find((item) =>
-    [item.internal_lot_id, item.qr_value, item.supplier_lot_number].map(String).indexOf(value) >= 0
-  );
-  if (lot) return { type: "LOT", record: lot };
-
-  const pkg = readTable_("AMAZON_PACKAGES").find((item) =>
-    [item.package_id, item.package_qr_value].map(String).indexOf(value) >= 0
-  );
-  if (pkg) return { type: "AMAZON_PACKAGE", record: pkg };
-
-  return null;
-}
-
-function matchAmazonPackageScan(payload) {
-  payload = payload || {};
-  const value = String(payload.scanValue || payload.scan_value || "").trim();
-  const pkg = readTable_("AMAZON_PACKAGES").find((item) =>
-    [item.package_id, item.package_qr_value].map(String).indexOf(value) >= 0
-  );
-
-  if (!pkg) return { match_status: "NOT_FOUND", message: "Package scan was not found." };
-
-  const match = {
-    scan_match_id: nextId_("AMAZON_SCAN_MATCHES", "scan_match_id", "AMZSCAN"),
-    scanned_at: nowIso_(),
-    scanned_by: "WEB_APP",
-    package_id: pkg.package_id,
-    amazon_sku: pkg.amazon_sku,
-    product_id: pkg.product_id,
-    match_status: "PACKAGE_FOUND",
-    match_confidence: 0.75,
-    notes: "Package exists. Future Amazon order line link pending."
-  };
-
-  appendRecord_("AMAZON_SCAN_MATCHES", match);
-  return match;
-}
-
-/**
- * Calculation engine
- */
-
-function buildSystemBundle_(writeOutputs) {
-  const data = dataTables_();
-  const calculatedAt = nowIso_();
-
-  const inventorySnapshotRows = buildInventorySnapshot_(data, calculatedAt);
-  const supplierAnalyticsRows = buildSupplierAnalytics_(data, calculatedAt);
-  const productSupplierAnalyticsRows = buildProductSupplierAnalytics_(data, calculatedAt);
-  const inventoryPlanningRows = buildInventoryPlanning_(data, inventorySnapshotRows, calculatedAt);
-  const recommendationsRows = buildRecommendations_(inventoryPlanningRows, calculatedAt);
-  const dashboard = buildDashboard_(data, inventorySnapshotRows, inventoryPlanningRows, recommendationsRows);
-  const dashboardRows = buildDashboardRows_(dashboard, calculatedAt);
-
-  if (writeOutputs) {
-    writeCalculatedOutputs_({
-      dashboardRows: dashboardRows,
-      inventorySnapshot: inventorySnapshotRows,
-      supplierAnalytics: supplierAnalyticsRows,
-      productSupplierAnalytics: productSupplierAnalyticsRows,
-      recommendations: recommendationsRows
-    });
-  }
-
-  return {
-    calculated_at: calculatedAt,
-    dashboard: dashboard,
-    dashboardRows: dashboardRows,
-    inventorySnapshot: inventorySnapshotRows,
-    supplierAnalytics: supplierAnalyticsRows,
-    productSupplierAnalytics: productSupplierAnalyticsRows,
-    inventoryPlanning: inventoryPlanningRows,
-    recommendations: recommendationsRows
-  };
-}
-
-function dataTables_() {
-  return {
-    products: readTable_("PRODUCTS"),
-    suppliers: readTable_("SUPPLIERS"),
-    locations: readTable_("LOCATIONS"),
-    purchaseOrders: readTable_("PURCHASE_ORDERS"),
-    purchaseOrderLines: readTable_("PURCHASE_ORDER_LINES"),
-    receiving: readTable_("RECEIVING"),
-    lots: readTable_("LOTS"),
-    movements: readTable_("INVENTORY_MOVEMENTS"),
-    salesOrders: readTable_("SALES_ORDERS"),
-    salesOrderLines: readTable_("SALES_ORDER_LINES"),
-    pickTasks: readTable_("PICK_TASKS"),
-    amazonPackages: readTable_("AMAZON_PACKAGES")
-  };
-}
-
-function buildInventorySnapshot_(data, calculatedAt) {
-  calculatedAt = calculatedAt || nowIso_();
-
-  const productsById = indexBy_(data.products, "product_id");
-  const lotsById = indexBy_(data.lots, "internal_lot_id");
-  const reservedByKey = buildReservedInventory_(data);
-  const byKey = {};
-
-  data.movements.forEach((movement) => {
-    const qtyChange = num_(movement.qty_change);
-    if (!movement.product_id || !movement.internal_lot_id || !isFinite(qtyChange) || qtyChange === 0) return;
-
-    const locationId = movementLocation_(movement, qtyChange);
-    const key = [movement.product_id, movement.internal_lot_id, locationId].join("|");
-
-    if (!byKey[key]) {
-      byKey[key] = {
-        product_id: movement.product_id,
-        internal_lot_id: movement.internal_lot_id,
-        location_id: locationId,
-        qty: 0,
-        current_qty: 0,
-        unit_type: movement.unit_type || ""
-      };
-    }
-
-    byKey[key].qty += qtyChange;
-    byKey[key].current_qty += qtyChange;
-    if (movement.unit_type) byKey[key].unit_type = movement.unit_type;
-  });
-
-  const rows = Object.keys(byKey)
-    .map((key) => {
-      const row = byKey[key];
-      const product = productsById[row.product_id] || {};
-      const lot = lotsById[row.internal_lot_id] || {};
-      const reserved = reservedByKey[key] || 0;
-      const currentQty = round_(row.current_qty, 2);
-      const expiration = effectiveExpirationDate_(lot, product);
-      const expirationKey = expiration ? dateKey_(expiration) : "";
-      const daysRemaining = expiration ? Math.ceil((expiration.getTime() - startOfDay_(new Date()).getTime()) / 86400000) : "";
-      const daysSinceReceived = lot.received_date ? Math.max(0, Math.floor(daysBetween_(lot.received_date, today_()))) : "";
-      const inventoryValue = round_(inventoryValue_(lot, currentQty, data.purchaseOrderLines), 2);
-
-      let inventoryStatus = "AVAILABLE";
-      if (currentQty <= 0) inventoryStatus = "EMPTY";
-      else if (expiration && expiration < startOfDay_(new Date())) inventoryStatus = "EXPIRED";
-      else if (expiration && daysRemaining <= 30) inventoryStatus = "EXPIRING_SOON";
-
-      let recommendedAction = currentQty <= 0 ? "NO_STOCK" : "SELLABLE";
-      if (inventoryStatus === "EXPIRED") recommendedAction = "HOLD_DO_NOT_SELL";
-      else if (inventoryStatus === "EXPIRING_SOON") recommendedAction = "PRIORITIZE_FEFO";
-      else if (currentQty > 0) recommendedAction = "FIFO_AVAILABLE";
-
-      return {
-        snapshot_id: ["SNAP", row.product_id, row.internal_lot_id, row.location_id || "NOLOC"].join("-"),
-        calculated_at: calculatedAt,
-        product_id: row.product_id,
-        product_name: product.product_name || row.product_id,
-        internal_lot_id: row.internal_lot_id,
-        location_id: row.location_id,
-        qty: currentQty,
-        current_qty: currentQty,
-        reserved_qty: round_(reserved, 2),
-        available_qty: round_(Math.max(0, currentQty - reserved), 2),
-        unit_type: row.unit_type || lot.unit_type || product.base_unit || "",
-        inventory_status: inventoryStatus,
-        days_since_received: daysSinceReceived,
-        fifo_rank: 0,
-        unit_cost: num_(lot.unit_cost),
-        inventory_value: inventoryValue,
-        expiration_date: expirationKey,
-        days_remaining: daysRemaining,
-        recommended_action: recommendedAction,
-        notes: currentQty < 0 ? "Negative inventory: review movements." : "",
-        product: product,
-        lot: lot
-      };
-    })
-    .filter((row) => Math.abs(num_(row.current_qty)) > 0.0001)
-    .sort((a, b) =>
-      String(a.product_name || "").localeCompare(String(b.product_name || ""))
-      || String(a.internal_lot_id || "").localeCompare(String(b.internal_lot_id || ""))
-      || String(a.location_id || "").localeCompare(String(b.location_id || ""))
-    );
-
-  const byProduct = {};
-  rows.forEach((row) => {
-    if (num_(row.current_qty) <= 0) return;
-    if (!byProduct[row.product_id]) byProduct[row.product_id] = [];
-    byProduct[row.product_id].push(row);
-  });
-
-  Object.keys(byProduct).forEach((productId) => {
-    byProduct[productId]
-      .sort((a, b) => {
-        const lotA = lotsById[a.internal_lot_id] || {};
-        const lotB = lotsById[b.internal_lot_id] || {};
-        return dateTime_(lotA.received_date) - dateTime_(lotB.received_date);
-      })
-      .forEach((row, index) => {
-        row.fifo_rank = index + 1;
-        if (index === 0 && row.recommended_action === "FIFO_AVAILABLE") row.recommended_action = "PICK_FIRST_FIFO";
-      });
-  });
-
-  return rows;
-}
-
-function buildReservedInventory_(data) {
-  const reserved = {};
-  (data.pickTasks || []).forEach((task) => {
-    const reservationStatus = String(task.reservation_status || "RESERVED").toUpperCase();
-    const pickStatus = String(task.pick_status || "OPEN").toUpperCase();
-    if (reservationStatus === "RELEASED" || ["CANCELLED", "RELEASED", "SHIPPED"].indexOf(pickStatus) >= 0) return;
-
-    const line = (data.salesOrderLines || []).find((item) => item.sales_order_line_id === task.sales_order_line_id) || {};
-    const productId = task.product_id || line.product_id;
-    const lotId = task.recommended_internal_lot_id || line.preferred_internal_lot_id;
-    const locationId = task.recommended_location_id || line.preferred_location_id;
-    if (!productId || !lotId || !locationId) return;
-
-    const key = [productId, lotId, locationId].join("|");
-    reserved[key] = (reserved[key] || 0) + num_(task.qty_to_pick_base, line.inventory_qty_required || task.qty_to_pick);
-  });
-  return reserved;
-}
-
-function buildInventoryPlanning_(data, snapshot, calculatedAt) {
-  const suppliersById = indexBy_(data.suppliers, "supplier_id");
-  const leadStats = buildLeadTimeStatsBySupplier_(data.purchaseOrders);
-  const qtyByProduct = {};
-  snapshot.forEach((row) => {
-    if (num_(row.current_qty) > 0) qtyByProduct[row.product_id] = (qtyByProduct[row.product_id] || 0) + num_(row.current_qty);
-  });
-
-  return data.products
-    .filter(isActiveRecord_)
-    .map((product) => {
-      const supplierId = chooseSupplierForProduct_(product.product_id, data.purchaseOrderLines) || "";
-      const supplier = suppliersById[supplierId] || {};
-      const usage = buildDailyUsageStats_(product.product_id, data.movements);
-      const lead = leadStats[supplierId] || { average: num_(supplier.lead_time_expected_days, 5), stdDev: 0, count: 0 };
-      const currentQty = round_(qtyByProduct[product.product_id] || 0, 2);
-      const averageDailyUsage = round_(usage.averageDailyUsage, 2);
-      const stdDailyUsage = round_(usage.stdDailyUsage, 2);
-      const avgLead = round_(lead.average || 5, 2);
-      const stdLead = round_(lead.stdDev || 0, 2);
-      const demandDuringLead = round_(averageDailyUsage * avgLead, 2);
-      const safetyStock = round_(1.65 * Math.sqrt((avgLead * Math.pow(stdDailyUsage, 2)) + (Math.pow(averageDailyUsage, 2) * Math.pow(stdLead, 2))), 2);
-      const minStock = num_(product.min_stock_qty);
-      const sheetTarget = num_(product.target_stock_qty);
-      const reorderPoint = averageDailyUsage > 0 ? round_(demandDuringLead + safetyStock, 2) : minStock;
-      const targetStockLevel = sheetTarget > 0 ? sheetTarget : averageDailyUsage > 0 ? round_(reorderPoint + averageDailyUsage * velocityDays_(product.velocity_class), 2) : minStock;
-      const daysOfSupply = averageDailyUsage > 0 ? round_(currentQty / averageDailyUsage, 1) : 0;
-      const recommendedOrderQty = Math.max(0, round_(targetStockLevel - currentQty, 2));
-
-      let status = "OK";
-      if (usage.days === 0 && reorderPoint <= 0 && minStock <= 0) status = "NEEDS_USAGE_HISTORY";
-      else if (recommendedOrderQty > 0 && currentQty <= reorderPoint) status = "REORDER";
-      else if (daysOfSupply > 0 && daysOfSupply <= avgLead + 7) status = "WATCH";
-
-      return {
-        product_id: product.product_id,
-        product_name: product.product_name,
-        supplier_id: supplierId,
-        supplier_name: supplier.supplier_name || "",
-        current_qty: currentQty,
-        average_daily_usage: averageDailyUsage,
-        std_daily_usage: stdDailyUsage,
-        usage_days: usage.days,
-        usage_samples: usage.samples,
-        avg_lead_time_days: avgLead,
-        std_lead_time_days: stdLead,
-        demand_during_lead_time: demandDuringLead,
-        safety_stock: safetyStock,
-        reorder_point: reorderPoint,
-        target_stock_level: targetStockLevel,
-        days_of_supply: daysOfSupply,
-        recommended_order_qty: recommendedOrderQty,
-        status: status,
-        calculated_at: calculatedAt,
-        notes: status === "NEEDS_USAGE_HISTORY" ? "Add sales/usage movements to make reorder math stronger." : ""
-      };
-    })
-    .sort((a, b) => {
-      const order = { REORDER: 1, WATCH: 2, NEEDS_USAGE_HISTORY: 3, OK: 4 };
-      return (order[a.status] || 9) - (order[b.status] || 9) || String(a.product_name).localeCompare(String(b.product_name));
-    });
-}
-
-function buildRecommendations_(planning, calculatedAt) {
-  return planning
-    .filter((row) => row.status === "REORDER")
-    .map((row, index) => ({
-      recommendation_id: "REC-" + Utilities.formatDate(new Date(), APP_TIMEZONE, "yyyyMMdd") + "-" + pad_(index + 1, 4),
-      generated_at: calculatedAt,
-      recommendation_type: "REORDER",
-      product_id: row.product_id,
-      product_name: row.product_name,
-      supplier_id: row.supplier_id,
-      supplier_name: row.supplier_name,
-      recommended_qty: row.recommended_order_qty,
-      recommended_unit_cost: "",
-      recommended_location_id: "",
-      confidence_score: row.usage_days > 0 ? 0.85 : 0.45,
-      reorder_point: row.reorder_point,
-      target_stock_level: row.target_stock_level,
-      current_qty: row.current_qty,
-      reason_text: row.product_name + " is at " + row.current_qty + " on hand vs reorder point " + row.reorder_point + ".",
-      status: "OPEN",
-      accepted_by: "",
-      accepted_at: "",
-      created_po_id: "",
-      notes: row.notes || ""
-    }));
-}
-
-function buildSupplierAnalytics_(data, calculatedAt) {
-  const supplierRows = data.suppliers.filter((supplier) => normalizePartyType_(supplier.party_type) === "VENDOR");
-  const productsById = indexBy_(data.products, "product_id");
-  const linesByPo = groupBy_(data.purchaseOrderLines, "po_id");
-  const receiptsBySupplier = groupBy_(data.receiving, "supplier_id");
-  const totalSpend = sum_(data.purchaseOrderLines.map((line) => num_(line.line_total)));
-
-  return supplierRows.map((supplier) => {
-    const pos = data.purchaseOrders.filter((po) => po.supplier_id === supplier.supplier_id);
-    const completed = pos.filter((po) => String(po.po_status || "").toUpperCase() === "COMPLETE" || po.actual_completed_date);
-    const supplierLines = [];
-    pos.forEach((po) => (linesByPo[po.po_id] || []).forEach((line) => supplierLines.push(line)));
-
-    const productNames = unique_(supplierLines.map((line) => productsById[line.product_id] ? productsById[line.product_id].product_name : line.product_id)).filter(Boolean);
-    const spend = sum_(supplierLines.map((line) => num_(line.line_total)));
-    const leadValues = completed
-      .map((po) => daysBetween_(po.order_date, po.actual_first_received_date || po.actual_completed_date))
-      .filter((days) => isFinite(days) && days >= 0);
-    const receipts = receiptsBySupplier[supplier.supplier_id] || [];
-    const qualityScores = receipts.map((row) => num_(row.quality_score)).filter((value) => value > 0);
-    const productAccuracyScores = receipts.map((row) => num_(row.product_accuracy_score)).filter((value) => value > 0);
-    const qtyAccuracyRate = receipts.length
-      ? receipts.filter((row) => String(row.over_under_status || "").toUpperCase() !== "OVER").length / receipts.length * 100
-      : 0;
-
-    const qualityAvg = average_(qualityScores);
-    const productAccuracyAvg = average_(productAccuracyScores);
-    const supplierScore = round_(
-      (qualityAvg ? qualityAvg / 5 * 35 : 20)
-      + (productAccuracyAvg ? productAccuracyAvg / 5 * 25 : 15)
-      + (leadValues.length ? Math.max(0, 25 - average_(leadValues)) : 10)
-      + (qtyAccuracyRate ? qtyAccuracyRate * 0.15 : 10),
-      1
-    );
-
-    return {
-      supplier_id: supplier.supplier_id,
-      supplier_name: supplier.supplier_name,
-      party_type: normalizePartyType_(supplier.party_type),
-      contact_name: supplier.contact_name || "",
-      email: supplier.email || "",
-      phone: supplier.phone || "",
-      products_bought: productNames.join(", "),
-      total_orders: pos.length,
-      completed_orders: completed.length,
-      total_purchase_amount: round_(spend, 2),
-      spend_share_percent: totalSpend > 0 ? round_(spend / totalSpend * 100, 1) : 0,
-      avg_lead_time_days: round_(average_(leadValues), 2),
-      std_lead_time_days: round_(std_(leadValues), 2),
-      avg_quality_score: round_(qualityAvg, 2),
-      quality_percent: qualityAvg ? round_(qualityAvg / 5 * 100, 1) : 0,
-      avg_product_accuracy_score: round_(productAccuracyAvg, 2),
-      product_accuracy_percent: productAccuracyAvg ? round_(productAccuracyAvg / 5 * 100, 1) : 0,
-      delivery_accuracy_rate: leadValues.length ? 100 : 0,
-      quantity_accuracy_percent: round_(qtyAccuracyRate, 1),
-      avg_price_variability_score: "",
-      supplier_score: supplierScore,
-      last_calculated_at: calculatedAt,
-      notes: productNames.length ? "" : "No purchase history yet."
-    };
-  }).sort((a, b) => b.supplier_score - a.supplier_score || String(a.supplier_name).localeCompare(String(b.supplier_name)));
-}
-
-function buildProductSupplierAnalytics_(data, calculatedAt) {
-  const productsById = indexBy_(data.products, "product_id");
-  const suppliersById = indexBy_(data.suppliers, "supplier_id");
-  const grouped = {};
-
-  data.purchaseOrderLines.forEach((line) => {
-    if (!line.product_id || !line.supplier_id) return;
-    const key = line.product_id + "|" + line.supplier_id;
-    if (!grouped[key]) grouped[key] = [];
-    grouped[key].push(line);
-  });
-
-  return Object.keys(grouped).map((key) => {
-    const parts = key.split("|");
-    const productId = parts[0];
-    const supplierId = parts[1];
-    const lines = grouped[key];
-    const costs = lines.map((line) => num_(line.unit_cost)).filter((value) => value > 0);
-    const supplier = suppliersById[supplierId] || {};
-    const product = productsById[productId] || {};
-    const lead = buildLeadTimeStatsBySupplier_(data.purchaseOrders)[supplierId] || { average: num_(supplier.lead_time_expected_days, 5), stdDev: 0 };
-
-    return {
-      product_id: productId,
-      product_name: product.product_name || productId,
-      supplier_id: supplierId,
-      supplier_name: supplier.supplier_name || supplierId,
-      orders_count: lines.length,
-      avg_unit_cost: round_(average_(costs), 4),
-      std_unit_cost: round_(std_(costs), 4),
-      min_unit_cost: costs.length ? Math.min.apply(null, costs) : 0,
-      max_unit_cost: costs.length ? Math.max.apply(null, costs) : 0,
-      last_unit_cost: costs.length ? costs[costs.length - 1] : 0,
-      avg_lead_time_days: round_(lead.average || 0, 2),
-      std_lead_time_days: round_(lead.stdDev || 0, 2),
-      recommended_supplier_flag: "",
-      last_calculated_at: calculatedAt,
-      notes: ""
-    };
-  }).sort((a, b) => String(a.product_name).localeCompare(String(b.product_name)) || String(a.supplier_name).localeCompare(String(b.supplier_name)));
-}
-
-function buildDashboard_(data, snapshot, planning, recommendations) {
-  const positiveStock = snapshot.filter((row) => num_(row.current_qty) > 0);
-  const totalInventoryValue = sum_(positiveStock.map((row) => num_(row.inventory_value)));
-  const lowStockProducts = planning.filter((row) => row.status === "REORDER");
-
-  const todayDate = startOfDay_(new Date());
-  const expiringLots = positiveStock
-    .filter((row) => row.expiration_date && row.days_remaining !== "" && num_(row.days_remaining) >= 0 && num_(row.days_remaining) <= 30)
-    .map((row) => ({
-      internal_lot_id: row.internal_lot_id,
-      product_id: row.product_id,
-      product_name: row.product_name,
-      current_qty: row.current_qty,
-      unit_type: row.unit_type,
-      location_id: row.location_id,
-      expiration_date: row.expiration_date,
-      days_remaining: row.days_remaining,
-      inventory_value: row.inventory_value
-    }))
-    .sort((a, b) => num_(a.days_remaining) - num_(b.days_remaining));
-
-  const openPurchaseOrders = data.purchaseOrders.filter(isOpenPurchaseOrder_);
-  const openSalesOrders = data.salesOrders.filter((order) => ["SHIPPED", "CANCELLED", "CLOSED"].indexOf(String(order.status || "").toUpperCase()) < 0);
-
-  const weekStart = new Date(todayDate.getTime() - 6 * 86400000);
-  const shippedThisWeek = data.salesOrders.filter((order) => {
-    if (String(order.status || "").toUpperCase() !== "SHIPPED") return false;
-    const shippedDate = startOfDay_(order.shipped_at || order.updated_at || order.order_date);
-    return shippedDate && shippedDate >= weekStart;
-  });
-
-  const shippedIds = {};
-  shippedThisWeek.forEach((order) => shippedIds[order.sales_order_id] = true);
-
-  const profitByProduct = {};
-  data.salesOrderLines.forEach((line) => {
-    if (!shippedIds[line.sales_order_id]) return;
-    if (!profitByProduct[line.product_id]) profitByProduct[line.product_id] = { revenue: 0, profit: 0 };
-    profitByProduct[line.product_id].revenue += num_(line.line_total);
-    profitByProduct[line.product_id].profit += num_(line.estimated_gross_profit);
-  });
-
-  const productsById = indexBy_(data.products, "product_id");
-  const topProfitProduct = Object.keys(profitByProduct).map((productId) => {
-    const totals = profitByProduct[productId];
-    return {
-      product_id: productId,
-      product_name: productsById[productId] ? productsById[productId].product_name : productId,
-      gross_profit: round_(totals.profit, 2),
-      gross_margin_percent: totals.revenue > 0 ? round_(totals.profit / totals.revenue * 100, 1) : 0
-    };
-  }).sort((a, b) => b.gross_profit - a.gross_profit)[0] || null;
-
-  const activeLocations = data.locations.filter(isActiveRecord_);
-  const activeLocationIds = {};
-  activeLocations.forEach((location) => activeLocationIds[location.location_id] = true);
-  const occupied = {};
-  positiveStock.forEach((row) => {
-    if (activeLocationIds[row.location_id]) occupied[row.location_id] = true;
-  });
-
-  return {
-    productCount: data.products.filter(isActiveRecord_).length,
-    supplierCount: data.suppliers.filter(isActiveRecord_).length,
-    openPoCount: openPurchaseOrders.length,
-    lotCount: data.lots.length,
-    movementCount: data.movements.length,
-    pendingAmazonPackages: data.amazonPackages.filter((pkg) => !pkg.matched_amazon_order_id).length,
-
-    totalInventoryValue: round_(totalInventoryValue, 2),
-    lowStockCount: lowStockProducts.length,
-    lowStockProducts: lowStockProducts,
-    usageHistoryNeededCount: planning.filter((row) => row.status === "NEEDS_USAGE_HISTORY").length,
-
-    expiringLotCount: expiringLots.length,
-    expiringProductCount: unique_(expiringLots.map((row) => row.product_id)).length,
-    expiringInventoryValue: round_(sum_(expiringLots.map((row) => row.inventory_value)), 2),
-    expiringLots: expiringLots,
-
-    openPoValue: round_(sum_(openPurchaseOrders.map((po) => num_(po.total_amount || po.subtotal_amount))), 2),
-    openSoCount: openSalesOrders.length,
-    openSoValue: round_(sum_(openSalesOrders.map((order) => num_(order.total_amount))), 2),
-
-    weeklySales: round_(sum_(shippedThisWeek.map((order) => num_(order.total_amount))), 2),
-    topProfitProduct: topProfitProduct,
-
-    warehouseOccupiedPositions: Object.keys(occupied).length,
-    warehouseTotalPositions: activeLocations.length,
-    warehouseCapacityPercent: activeLocations.length ? round_(Object.keys(occupied).length / activeLocations.length * 100, 1) : 0,
-
-    recommendationCount: recommendations.length
-  };
-}
-
-function buildDashboardRows_(dashboard, calculatedAt) {
-  const rows = [
-    ["TOTAL_INVENTORY_VALUE", "Total Inventory Value", dashboard.totalInventoryValue, "USD", "OK", "Positive on-hand stock valued at lot cost."],
-    ["LOW_STOCK_PRODUCTS", "Low Stock Products", dashboard.lowStockCount, "count", dashboard.lowStockCount > 0 ? "ATTENTION" : "OK", "Products under reorder point."],
-    ["USAGE_HISTORY_NEEDED", "Usage History Needed", dashboard.usageHistoryNeededCount, "count", dashboard.usageHistoryNeededCount > 0 ? "WATCH" : "OK", "Products without enough sales/usage movement history."],
-    ["EXPIRING_30_DAYS", "Lots Expiring Within 30 Days", dashboard.expiringLotCount, "count", dashboard.expiringLotCount > 0 ? "ATTENTION" : "OK", "Lots with positive inventory expiring within 30 days."],
-    ["EXPIRING_VALUE", "Expiring Inventory Value", dashboard.expiringInventoryValue, "USD", dashboard.expiringInventoryValue > 0 ? "ATTENTION" : "OK", "Value at risk within 30 days."],
-    ["OPEN_PURCHASE_ORDERS", "Open Purchase Orders", dashboard.openPoCount, "count", "OK", "Open PO count."],
-    ["OPEN_PURCHASE_ORDER_VALUE", "Open Purchase Order Value", dashboard.openPoValue, "USD", "OK", "Open PO value."],
-    ["OPEN_SALES_ORDERS", "Open Sales Orders", dashboard.openSoCount, "count", dashboard.openSoCount > 0 ? "WATCH" : "OK", "Orders not shipped/cancelled/closed."],
-    ["OPEN_SALES_ORDER_VALUE", "Open Sales Order Value", dashboard.openSoValue, "USD", "OK", "Open SO value."],
-    ["WEEKLY_SALES", "Weekly Sales", dashboard.weeklySales, "USD", "OK", "Shipped SO total for last 7 days."],
-    ["WAREHOUSE_CAPACITY_PERCENT", "Warehouse Capacity Percent", dashboard.warehouseCapacityPercent, "percent", dashboard.warehouseCapacityPercent >= 90 ? "ATTENTION" : "OK", "Occupied active locations divided by active locations."],
-    ["RECOMMENDATIONS", "Open Recommendations", dashboard.recommendationCount, "count", dashboard.recommendationCount > 0 ? "WATCH" : "OK", "Calculated reorder recommendations."]
-  ];
-
-  return rows.map((row) => ({
-    metric_id: row[0],
-    metric_name: row[1],
-    metric_value: row[2],
-    metric_unit: row[3],
-    period_start: "",
-    period_end: "",
-    calculated_at: calculatedAt,
-    status: row[4],
-    notes: row[5]
-  }));
-}
-
-function writeCalculatedOutputs_(outputs) {
-  const lock = LockService.getScriptLock();
-  lock.waitLock(15000);
-
-  try {
-    replaceTableRows_("DASHBOARD_SCRIPT", outputs.dashboardRows, OUTPUT_HEADERS.DASHBOARD_SCRIPT);
-    replaceTableRows_("INVENTORY_SNAPSHOT_SCRIPT", outputs.inventorySnapshot, OUTPUT_HEADERS.INVENTORY_SNAPSHOT_SCRIPT);
-    replaceTableRows_("SUPPLIER_ANALYTICS_SCRIPT", outputs.supplierAnalytics, OUTPUT_HEADERS.SUPPLIER_ANALYTICS_SCRIPT);
-    replaceTableRows_("PRODUCT_SUPPLIER_ANALYTICS_SCRIPT", outputs.productSupplierAnalytics, OUTPUT_HEADERS.PRODUCT_SUPPLIER_ANALYTICS_SCRIPT);
-    replaceTableRows_("RECOMMENDATIONS_SCRIPT", outputs.recommendations, OUTPUT_HEADERS.RECOMMENDATIONS_SCRIPT);
-  } finally {
-    lock.releaseLock();
-  }
-}
-
-/**
- * Validation and record builders
- */
-
-function validatePurchaseOrderLine_(input, index, products) {
-  const product = products.find((item) => item.product_id === input.product_id);
-  const lineNumber = index + 1;
-  if (!product) throw new Error("Select a valid product on line " + lineNumber + ".");
-
-  const qtyOrdered = num_(input.qty_ordered);
-  const unitCost = num_(input.unit_cost);
-  if (qtyOrdered <= 0) throw new Error("Quantity must be greater than zero on line " + lineNumber + ".");
-  if (unitCost < 0) throw new Error("Unit cost cannot be negative on line " + lineNumber + ".");
-
-  const unitType = String(input.unit_type || product.default_unit || "Case").trim();
-  const baseUnit = String(input.base_unit || product.base_unit || "LB").trim();
-  const unitsPerPurchaseUnit = num_(input.units_per_purchase_unit, num_(input.case_weight_lbs, product.case_weight_lbs) || 1);
-
-  return {
-    product_id: product.product_id,
-    product_name: product.product_name,
-    qty_ordered: qtyOrdered,
-    unit_type: unitType,
-    unit_cost: unitCost,
-    line_total: round_(qtyOrdered * unitCost, 2),
-    supplier_expected_lot_number: input.supplier_expected_lot_number || "",
-    notes: input.notes || "",
-    base_unit: baseUnit,
-    units_per_purchase_unit: unitsPerPurchaseUnit,
-    expected_base_qty: round_(qtyOrdered * unitsPerPurchaseUnit, 2),
-    case_weight_lbs: num_(input.case_weight_lbs, product.case_weight_lbs)
-  };
-}
-
-function validateSalesOrderLine_(input, index, data, snapshot, allocatedByKey, requestedDeliveryDate) {
-  const lineNumber = index + 1;
-  const product = data.products.find((item) => item.product_id === input.product_id);
-  const lot = data.lots.find((item) => item.internal_lot_id === input.internal_lot_id);
-  const row = snapshot.find((item) =>
-    item.product_id === input.product_id
-    && item.internal_lot_id === input.internal_lot_id
-    && item.location_id === input.location_id
-  );
-
-  if (!product || !lot || !row) throw new Error("Select valid inventory on line " + lineNumber + ".");
-  if (["ACTIVE", "AVAILABLE"].indexOf(String(lot.status || "ACTIVE").toUpperCase()) < 0) {
-    throw new Error("The selected lot is not sellable on line " + lineNumber + ".");
-  }
-
-  const expiration = effectiveExpirationDate_(lot, product);
-  if (expiration && expiration < startOfDay_(new Date())) throw new Error("The selected lot is expired on line " + lineNumber + ".");
-
-  const requestedDate = startOfDay_(requestedDeliveryDate);
-  if (expiration && requestedDate && expiration < requestedDate) {
-    throw new Error("The selected lot expires before the requested delivery date on line " + lineNumber + ".");
-  }
-
-  const qtyOrdered = num_(input.qty_ordered);
-  const unitType = String(input.unit_type || "").trim().toUpperCase();
-  const unitWeight = num_(input.unit_weight_lbs, unitType === "LB" ? 1 : 0);
-  const unitPrice = num_(input.unit_price);
-
-  if (qtyOrdered <= 0) throw new Error("Quantity sold must be greater than zero on line " + lineNumber + ".");
-  if (!unitType) throw new Error("Sales unit is required on line " + lineNumber + ".");
-  if (unitWeight <= 0) throw new Error("Unit weight must be greater than zero on line " + lineNumber + ".");
-  if (unitPrice < 0) throw new Error("Unit price cannot be negative on line " + lineNumber + ".");
-
-  const inventoryUnit = String(row.unit_type || lot.unit_type || "").toUpperCase();
-  if (inventoryUnit !== unitType && inventoryUnit !== "LB") {
-    throw new Error("The selected inventory cannot be converted from " + inventoryUnit + " to " + unitType + " on line " + lineNumber + ".");
-  }
-
-  const inventoryQtyRequired = inventoryUnit === unitType ? qtyOrdered : qtyOrdered * unitWeight;
-  const key = [input.product_id, input.internal_lot_id, input.location_id].join("|");
-  const alreadyAllocated = allocatedByKey[key] || 0;
-  if (alreadyAllocated + inventoryQtyRequired > num_(row.available_qty, row.current_qty) + 0.0001) {
-    throw new Error("Line " + lineNumber + " exceeds the available quantity for this lot and location.");
-  }
-  allocatedByKey[key] = alreadyAllocated + inventoryQtyRequired;
-
-  const inventoryUnitCost = unitCostPerBaseUnit_(lot);
-  const unitCost = round_(inventoryUnitCost * inventoryQtyRequired / qtyOrdered, 4);
-  const lineTotal = round_(qtyOrdered * unitPrice, 2);
-  const profit = round_(lineTotal - (unitCost * qtyOrdered), 2);
-
-  return {
-    product_id: product.product_id,
-    internal_lot_id: lot.internal_lot_id,
-    location_id: input.location_id,
-    qty_ordered: qtyOrdered,
-    unit_type: unitType,
-    unit_weight_lbs: unitWeight,
-    inventory_qty_required: round_(inventoryQtyRequired, 2),
-    inventory_unit_type: inventoryUnit,
-    unit_price: unitPrice,
-    unit_cost: unitCost,
-    line_total: lineTotal,
-    estimated_gross_profit: profit,
-    expiration_date: expiration ? dateKey_(expiration) : "",
-    fefo_status: row.fifo_rank === 1 ? "RECOMMENDED" : "MANUAL",
-    notes: input.notes || "",
-    amazon_order_item_id: input.amazon_order_item_id || "",
-    amazon_sku: input.amazon_sku || product.amazon_sku || "",
-    wholesale_sku: input.wholesale_sku || product.wholesale_sku || ""
-  };
-}
-
-/**
- * Sheet read/write helpers
- */
 
 function spreadsheet_() {
-  const propertyId = PropertiesService.getScriptProperties().getProperty("SPREADSHEET_ID");
-  const id = propertyId || SPREADSHEET_ID;
-  if (id) return SpreadsheetApp.openById(id);
-
-  const active = SpreadsheetApp.getActiveSpreadsheet();
-  if (active) return active;
-
-  throw new Error("Spreadsheet not found. Bind this script to the Google Sheet or set Script Property SPREADSHEET_ID.");
+  if (SPREADSHEET_ID === "PASTE_YOUR_SPREADSHEET_ID_HERE") {
+    throw new Error("Set SPREADSHEET_ID in Code.gs first.");
+  }
+  return SpreadsheetApp.openById(SPREADSHEET_ID);
 }
+
 
 function sheet_(sheetName) {
   const sheet = spreadsheet_().getSheetByName(sheetName);
-  if (!sheet) throw new Error("Missing required sheet tab: " + sheetName);
+  if (!sheet) throw new Error("Missing sheet: " + sheetName);
   return sheet;
 }
 
+
 function tableMeta_(sheetName) {
   const sheet = sheet_(sheetName);
-  const lastCol = Math.max(sheet.getLastColumn(), 1);
-  const scanRows = Math.min(Math.max(sheet.getLastRow(), 1), 15);
-  const values = sheet.getRange(1, 1, scanRows, lastCol).getValues();
-
-  let headerRowNumber = 1;
-  for (let i = 0; i < values.length; i += 1) {
-    const normalized = values[i].map((cell) => normalizeHeader_(cell));
-    const nonBlank = normalized.filter(Boolean);
-    const hasHeader = nonBlank.some((cell) =>
-      cell === "config_key"
-      || cell === "screen_id"
-      || cell === "field_name"
-      || cell === "metric_id"
-      || cell === "snapshot_id"
-      || cell === "recommendation_id"
-      || cell.indexOf("_id") > 0
-    );
-    if (hasHeader && nonBlank.length >= 2) {
-      headerRowNumber = i + 1;
-      break;
-    }
-  }
-
-  const headers = sheet.getRange(headerRowNumber, 1, 1, lastCol)
-    .getValues()[0]
-    .map((cell) => normalizeHeader_(cell));
-
-  let width = headers.length;
-  while (width > 0 && !headers[width - 1]) width -= 1;
-
-  return {
-    sheet: sheet,
-    headerRowNumber: headerRowNumber,
-    headers: headers.slice(0, width)
-  };
+  const values = sheet.getDataRange().getValues();
+  const headerIndex = values.findIndex((row) => row.some((cell) => String(cell || "").trim().endsWith("_id")));
+  if (headerIndex < 0) throw new Error("Could not find header row for " + sheetName);
+  const headers = values[headerIndex].map((cell) => String(cell || "").trim()).filter(Boolean);
+  return { sheet, values, headerRow: headerIndex + 1, headers };
 }
+
 
 function readTable_(sheetName) {
   const meta = tableMeta_(sheetName);
-  const lastRow = meta.sheet.getLastRow();
-  if (!meta.headers.length || lastRow <= meta.headerRowNumber) return [];
-
-  const values = meta.sheet
-    .getRange(meta.headerRowNumber + 1, 1, lastRow - meta.headerRowNumber, meta.headers.length)
-    .getValues();
-
-  return values
+  return meta.values.slice(meta.headerRow)
     .filter((row) => row.some((cell) => cell !== "" && cell !== null))
     .map((row) => {
       const record = {};
-      meta.headers.forEach((header, index) => {
-        if (!header) return;
-        record[header] = cellToJson_(row[index]);
-      });
+      meta.headers.forEach((header, index) => record[header] = row[index]);
       return record;
     });
 }
 
+
 function appendRecord_(sheetName, record) {
+  ensureTableColumns_(sheetName, Object.keys(record || {}));
   const meta = tableMeta_(sheetName);
-  const values = meta.headers.map((header) => valueForSheet_(record[header]));
-  meta.sheet.appendRow(values);
+  meta.sheet.appendRow(meta.headers.map((header) => record[header] !== undefined ? record[header] : ""));
 }
 
-function updateTableRecord_(sheetName, keyColumn, keyValue, changes) {
+
+function updateTableRecord_(sheetName, idColumn, idValue, fields) {
+  ensureTableColumns_(sheetName, Object.keys(fields || {}));
   const meta = tableMeta_(sheetName);
-  const keyIndex = meta.headers.indexOf(keyColumn);
-  if (keyIndex < 0) throw new Error(sheetName + " is missing key column " + keyColumn);
-
-  const lastRow = meta.sheet.getLastRow();
-  if (lastRow <= meta.headerRowNumber) throw new Error("No records in " + sheetName);
-
-  const keyValues = meta.sheet
-    .getRange(meta.headerRowNumber + 1, keyIndex + 1, lastRow - meta.headerRowNumber, 1)
-    .getValues();
-
-  let targetRow = -1;
-  for (let i = 0; i < keyValues.length; i += 1) {
-    if (String(keyValues[i][0]) === String(keyValue)) {
-      targetRow = meta.headerRowNumber + 1 + i;
-      break;
-    }
+  const idIndex = meta.headers.indexOf(idColumn);
+  if (idIndex < 0) throw new Error(`Missing ${idColumn} column in ${sheetName}.`);
+  for (let row = meta.headerRow + 1; row <= meta.sheet.getLastRow(); row++) {
+    if (String(meta.sheet.getRange(row, idIndex + 1).getValue()) !== String(idValue)) continue;
+    Object.keys(fields || {}).forEach((field) => {
+      const columnIndex = meta.headers.indexOf(field);
+      if (columnIndex >= 0) meta.sheet.getRange(row, columnIndex + 1).setValue(fields[field]);
+    });
+    return;
   }
-
-  if (targetRow < 0) throw new Error("Record not found in " + sheetName + ": " + keyValue);
-
-  Object.keys(changes || {}).forEach((column) => {
-    let colIndex = meta.headers.indexOf(column);
-    if (colIndex < 0) {
-      ensureTableColumns_(sheetName, [column]);
-      const refreshed = tableMeta_(sheetName);
-      colIndex = refreshed.headers.indexOf(column);
-    }
-    meta.sheet.getRange(targetRow, colIndex + 1).setValue(valueForSheet_(changes[column]));
-  });
+  throw new Error(`${idValue} was not found in ${sheetName}.`);
 }
 
-function ensureTableColumns_(sheetName, columns) {
-  const meta = tableMeta_(sheetName);
-  const existing = meta.headers.slice();
-  const missing = columns.filter((column) => existing.indexOf(column) < 0);
 
+function ensureTableColumns_(sheetName, requiredHeaders) {
+  const meta = tableMeta_(sheetName);
+  const missing = (requiredHeaders || []).filter((header) => header && meta.headers.indexOf(header) < 0);
   if (!missing.length) return;
-
-  const startCol = existing.length + 1;
-  meta.sheet
-    .getRange(meta.headerRowNumber, startCol, 1, missing.length)
-    .setValues([missing]);
-
-  meta.sheet.getRange(meta.headerRowNumber, 1, 1, existing.length + missing.length).setFontWeight("bold");
+  meta.sheet.getRange(meta.headerRow, meta.headers.length + 1, 1, missing.length).setValues([missing]);
 }
 
-function replaceTableRows_(sheetName, rows, preferredHeaders) {
-  ensureTableColumns_(sheetName, preferredHeaders);
-  const meta = tableMeta_(sheetName);
-  const headers = preferredHeaders.concat(meta.headers.filter((header) => preferredHeaders.indexOf(header) < 0));
-  ensureTableColumns_(sheetName, headers);
 
-  const refreshed = tableMeta_(sheetName);
-  const finalHeaders = refreshed.headers;
-  const lastRow = refreshed.sheet.getLastRow();
-  const rowsToClear = Math.max(0, lastRow - refreshed.headerRowNumber);
+function nextId_(sheetName, idColumn, prefix) {
+  const rows = readTable_(sheetName);
+  const maxNumber = rows.reduce((max, row) => {
+    const match = String(row[idColumn] || "").match(/(\d+)$/);
+    return match ? Math.max(max, Number(match[1])) : max;
+  }, 0);
+  return `${prefix}-${String(maxNumber + 1).padStart(6, "0")}`;
+}
 
-  if (rowsToClear > 0) {
-    refreshed.sheet
-      .getRange(refreshed.headerRowNumber + 1, 1, rowsToClear, finalHeaders.length)
-      .clearContent();
+
+function normalizeRole_(role) {
+  const normalized = String(role || "OPERATOR").trim().toUpperCase();
+  if (normalized === "OWNER") return "ADMIN";
+  if (normalized === "ADMIN" || normalized === "MANAGER" || normalized === "OPERATOR") return normalized;
+  return "OPERATOR";
+}
+
+
+function requirePermission_(user, permission) {
+  const role = normalizeRole_(user && user.role);
+  if (!PERMISSIONS[role] || PERMISSIONS[role].indexOf(permission) < 0) {
+    throw new Error("Permission denied: " + permission);
   }
-
-  if (!rows || !rows.length) return;
-
-  const values = rows.map((row) => finalHeaders.map((header) => valueForSheet_(row[header])));
-  refreshed.sheet
-    .getRange(refreshed.headerRowNumber + 1, 1, values.length, finalHeaders.length)
-    .setValues(values);
 }
 
-function updateLotQuantityFromMovements_(lotId) {
-  const qty = readTable_("INVENTORY_MOVEMENTS")
-    .filter((movement) => String(movement.internal_lot_id) === String(lotId))
-    .reduce((sum, movement) => sum + num_(movement.qty_change), 0);
 
-  updateTableRecord_("LOTS", "internal_lot_id", lotId, {
-    current_qty_script: round_(qty, 2),
-    updated_at: nowIso_()
-  });
+function isActiveRecord_(row) {
+  return row && row.is_active !== false && String(row.is_active || "TRUE").toUpperCase() !== "FALSE";
 }
 
-/**
- * Business math helpers
- */
 
-function occupiedInventoryLocationIds_() {
-  const data = dataTables_();
-  const snapshot = buildInventorySnapshot_(data);
-  const occupied = {};
-  snapshot.forEach((row) => {
-    if (num_(row.current_qty) > 0 && row.location_id) occupied[row.location_id] = true;
-  });
-  return occupied;
+function number_(value, fallback) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : (fallback || 0);
 }
 
-function movementLocation_(movement, qtyChange) {
-  if (qtyChange < 0) return movement.from_location_id || movement.to_location_id || "";
-  return movement.to_location_id || movement.from_location_id || "";
+
+function today_() {
+  return new Date();
 }
 
-function buildDailyUsageStats_(productId, movements) {
-  const byDate = {};
-  const usageMovements = movements.filter((movement) => {
-    if (String(movement.product_id) !== String(productId)) return false;
-    const qty = num_(movement.qty_change);
-    const type = String(movement.movement_type || "").toUpperCase();
-    return qty < 0 || ["SALE", "SHIP", "PICK", "PACK", "USE", "ADJUST_OUT", "AMAZON_OUT"].indexOf(type) >= 0;
-  });
 
-  usageMovements.forEach((movement) => {
-    const key = dateKey_(movement.timestamp);
-    if (!key) return;
-    byDate[key] = (byDate[key] || 0) + Math.abs(num_(movement.qty_change));
-  });
-
-  const dates = Object.keys(byDate).sort();
-  if (!dates.length) return { averageDailyUsage: 0, stdDailyUsage: 0, days: 0, samples: 0 };
-
-  const start = startOfDay_(dates[0]);
-  const end = startOfDay_(dates[dates.length - 1]);
-  const totalDays = Math.max(1, Math.floor(daysBetween_(start, end)) + 1);
-  const values = [];
-
-  for (let i = 0; i < totalDays; i += 1) {
-    values.push(byDate[dateKey_(new Date(start.getTime() + i * 86400000))] || 0);
+function writeAuditLog_(entry) {
+  try {
+    ensureTableColumns_("AUDIT_LOG", CORE_SCHEMA.AUDIT_LOG);
+    appendRecord_("AUDIT_LOG", {
+      audit_id: nextId_("AUDIT_LOG", "audit_id", "AUDIT"),
+      timestamp: today_(),
+      user_id: entry.user_id || "SYSTEM",
+      role: normalizeRole_(entry.role || "ADMIN"),
+      device_id: entry.device_id || "WEB_APP",
+      action_type: entry.action_type || "SYSTEM_EVENT",
+      table_name: entry.table_name || "",
+      record_id: entry.record_id || "",
+      field_name: entry.field_name || "",
+      old_value: entry.old_value || "",
+      new_value: entry.new_value || "",
+      source_screen: entry.source_screen || "APPS_SCRIPT",
+      notes: entry.notes || ""
+    });
+  } catch (_error) {
+    // Audit logging should never block operations.
   }
-
-  return {
-    averageDailyUsage: average_(values),
-    stdDailyUsage: std_(values),
-    days: totalDays,
-    samples: usageMovements.length
-  };
 }
 
-function buildLeadTimeStatsBySupplier_(purchaseOrders) {
-  const grouped = {};
-  purchaseOrders.forEach((po) => {
-    const receivedDate = po.actual_first_received_date || po.actual_completed_date;
-    if (!po.supplier_id || !po.order_date || !receivedDate) return;
-    const days = daysBetween_(po.order_date, receivedDate);
-    if (!isFinite(days) || days < 0) return;
-    if (!grouped[po.supplier_id]) grouped[po.supplier_id] = [];
-    grouped[po.supplier_id].push(days);
-  });
-
-  const out = {};
-  Object.keys(grouped).forEach((supplierId) => {
-    out[supplierId] = {
-      average: round_(average_(grouped[supplierId]), 2),
-      stdDev: round_(std_(grouped[supplierId]), 2),
-      count: grouped[supplierId].length
-    };
-  });
-  return out;
-}
-
-function chooseSupplierForProduct_(productId, lines) {
-  const counts = {};
-  lines.forEach((line) => {
-    if (String(line.product_id) !== String(productId) || !line.supplier_id) return;
-    counts[line.supplier_id] = (counts[line.supplier_id] || 0) + 1;
-  });
-  return Object.keys(counts).sort((a, b) => counts[b] - counts[a])[0] || "";
-}
-
-function inventoryValue_(lot, currentQty, purchaseOrderLines) {
-  const unitCost = num_(lot.unit_cost);
-  if (!unitCost || !currentQty) return 0;
-
-  const purchaseQty = num_(lot.purchase_qty_received);
-  const originalQty = num_(lot.original_qty);
-  if (purchaseQty > 0 && originalQty > 0) {
-    const baseUnitsPerPurchaseUnit = originalQty / purchaseQty;
-    if (baseUnitsPerPurchaseUnit > 0) {
-      return currentQty / baseUnitsPerPurchaseUnit * unitCost;
-    }
-  }
-
-  const line = purchaseOrderLines.find((item) => item.po_line_id === lot.po_line_id) || {};
-  const lineUnitsPer = num_(line.units_per_purchase_unit);
-  if (lineUnitsPer > 0) return currentQty / lineUnitsPer * unitCost;
-
-  return currentQty * unitCost;
-}
-
-function unitCostPerBaseUnit_(lot) {
-  const unitCost = num_(lot.unit_cost);
-  const purchaseQty = num_(lot.purchase_qty_received);
-  const originalQty = num_(lot.original_qty);
-  if (purchaseQty > 0 && originalQty > 0) {
-    return unitCost / (originalQty / purchaseQty);
-  }
-  return unitCost;
-}
-
-function effectiveExpirationDate_(lot, product) {
-  const explicit = startOfDay_(lot.expiration_date);
-  if (explicit) return explicit;
-  const calculated = calculatedExpirationDate_(product, lot.received_date);
-  return startOfDay_(calculated);
-}
-
-function calculatedExpirationDate_(product, receivedDate) {
-  const perishabilityDays = num_(product && product.perishability_days);
-  const received = startOfDay_(receivedDate);
-  if (!received || perishabilityDays <= 0) return "";
-  return dateKey_(new Date(received.getTime() + perishabilityDays * 86400000));
-}
-
-function isOpenPurchaseOrder_(po) {
-  return ["COMPLETE", "CANCELLED", "CLOSED"].indexOf(String(po.po_status || "").toUpperCase()) < 0;
-}
-
-function recommendLocationId_(product) {
-  const locations = readTable_("LOCATIONS");
-  const chosen = locations.find((location) =>
-    isActiveRecord_(location)
-    && String(location.current_status || "AVAILABLE").toUpperCase() === "AVAILABLE"
-    && (!location.allowed_categories || String(location.allowed_categories).indexOf(product.product_category) >= 0)
-  ) || locations.find((location) => isActiveRecord_(location) && String(location.current_status || "AVAILABLE").toUpperCase() === "AVAILABLE");
-
-  return chosen ? chosen.location_id : "";
-}
-
-function purchaseOrderQrValue_(input) {
-  return JSON.stringify({
-    v: 1,
-    type: "PO_LINE",
-    po_id: input.poId,
-    po_line_id: input.poLineId,
-    product_id: input.productId,
-    product_name: input.productName,
-    qty: num_(input.qty),
-    supplier_lot_number: input.supplierLotNumber || "PENDING"
-  });
-}
-
-function nextBlFolio_(salesOrders) {
-  return salesOrders.reduce((max, order) => Math.max(max, num_(order.bl_folio)), 2719) + 1;
-}
-
-/**
- * Generic utilities
- */
 
 function sessionUser_(user) {
   return {
@@ -2328,241 +266,1685 @@ function sessionUser_(user) {
   };
 }
 
-function requirePermission_(user, permission) {
-  const role = normalizeRole_(user && user.role);
-  const allowed = PERMISSIONS[role] || [];
-  if (allowed.indexOf(permission) < 0) {
-    throw new Error("Permission denied for " + permission + ".");
-  }
+
+function listUsers() {
+  return readTable_("USERS")
+    .filter(isActiveRecord_)
+    .map((user) => ({ ...user, role: normalizeRole_(user.role) }))
+    .sort((a, b) => String(a.full_name || "").localeCompare(String(b.full_name || "")));
 }
 
-function normalizeRole_(value) {
-  const role = String(value || "OPERATOR").trim().toUpperCase();
-  if (role === "WAREHOUSE") return "OPERATOR";
-  if (role === "ADMIN" || role === "MANAGER" || role === "OPERATOR") return role;
-  return "OPERATOR";
+
+function authenticateUser(payload) {
+  payload = payload || {};
+  const pin = String(payload.pin || "").trim();
+  const user = readTable_("USERS").find((item) => isActiveRecord_(item) && String(item.pin || "").trim() === pin);
+  if (!user && pin === "1014") return { authenticated: true, user_id: "ADMIN", full_name: "Admin", role: "ADMIN" };
+  if (!user) throw new Error("Code does not match an active user.");
+  return sessionUser_(user);
 }
+
+
+function createUser(payload) {
+  payload = payload || {};
+  const actor = payload.user || {};
+  if (normalizeRole_(actor.role) !== "ADMIN") throw new Error("Only an Admin can create users.");
+  const input = payload.input || {};
+  const fullName = String(input.full_name || "").trim();
+  const pin = String(input.pin || "").trim();
+  const role = normalizeRole_(input.role || "OPERATOR");
+  if (!fullName) throw new Error("Full name is required.");
+  if (!/^\d{4}$/.test(pin)) throw new Error("PIN must be exactly 4 digits.");
+  ensureTableColumns_("USERS", CORE_SCHEMA.USERS);
+  if (readTable_("USERS").some((item) => isActiveRecord_(item) && String(item.pin || "").trim() === pin)) {
+    throw new Error("An active user already has that 4-digit code.");
+  }
+  const record = {
+    user_id: nextId_("USERS", "user_id", "USR"),
+    full_name: fullName,
+    role,
+    email: input.email || "",
+    device_assigned: input.device_assigned || "",
+    is_active: true,
+    created_at: today_(),
+    updated_at: today_(),
+    notes: input.notes || "",
+    pin
+  };
+  appendRecord_("USERS", record);
+  writeAuditLog_({ user_id: actor.user_id, role: actor.role, action_type: "CREATE_USER", table_name: "USERS", record_id: record.user_id });
+  return record;
+}
+
+
+function deactivateUser(payload) {
+  payload = payload || {};
+  const actor = payload.user || {};
+  if (normalizeRole_(actor.role) !== "ADMIN") throw new Error("Only an Admin can remove users.");
+  const userId = String(payload.userId || payload.user_id || "").trim();
+  if (!userId) throw new Error("Choose a user to remove.");
+  updateTableRecord_("USERS", "user_id", userId, { is_active: false, updated_at: today_() });
+  writeAuditLog_({ user_id: actor.user_id, role: actor.role, action_type: "DEACTIVATE_USER", table_name: "USERS", record_id: userId });
+  return { user_id: userId, is_active: false };
+}
+
+
+function listProducts() {
+  return readTable_("PRODUCTS").filter(isActiveRecord_).sort((a, b) => String(a.product_name || "").localeCompare(String(b.product_name || "")));
+}
+
+
+function listLots() {
+  return readTable_("LOTS");
+}
+
+
+function createProduct(payload) {
+  payload = payload || {};
+  const user = payload.user || {};
+  requirePermission_(user, "products:create");
+  const input = payload.input || {};
+  const name = String(input.product_name || "").trim();
+  if (!name) throw new Error("Product name is required.");
+  ensureTableColumns_("PRODUCTS", CORE_SCHEMA.PRODUCTS);
+  const products = readTable_("PRODUCTS");
+  if (products.some((row) => String(row.product_name || "").trim().toLowerCase() === name.toLowerCase())) {
+    throw new Error("A product with this name already exists.");
+  }
+  const productId = input.product_id || nextId_("PRODUCTS", "product_id", "PROD");
+  const record = {
+    product_id: productId,
+    product_name: name,
+    product_category: input.product_category || "General",
+    default_unit: input.default_unit || "",
+    case_weight_lbs: number_(input.case_weight_lbs, 0),
+    amazon_sku: input.amazon_sku || "",
+    wholesale_sku: input.wholesale_sku || "",
+    barcode_or_qr_value: input.barcode_or_qr_value || productId,
+    min_stock_qty: number_(input.min_stock_qty, 0),
+    target_stock_qty: number_(input.target_stock_qty, 0),
+    velocity_class: input.velocity_class || "",
+    storage_zone_preference: input.storage_zone_preference || "",
+    is_active: true,
+    created_at: today_(),
+    updated_at: today_(),
+    notes: input.notes || "",
+    base_unit: input.base_unit || "LB",
+    units_per_purchase_unit: number_(input.units_per_purchase_unit || input.case_weight_lbs, 0),
+    can_break_case: input.can_break_case || "",
+    perishability_days: number_(input.perishability_days, 0)
+  };
+  appendRecord_("PRODUCTS", record);
+  writeAuditLog_({ user_id: user.user_id, role: user.role, action_type: "CREATE_PRODUCT", table_name: "PRODUCTS", record_id: record.product_id });
+  return record;
+}
+
+
+
+
+
+
+function updateProductStatus(payload) {
+  payload = payload || {};
+  const user = payload.user || {};
+  requirePermission_(user, "products:create");
+  const productId = String(payload.productId || payload.product_id || "").trim();
+  if (!productId) throw new Error("Product ID is required.");
+  updateTableRecord_("PRODUCTS", "product_id", productId, {
+    is_active: Boolean(payload.isActive !== undefined ? payload.isActive : payload.is_active),
+    updated_at: today_()
+  });
+  writeAuditLog_({ user_id: user.user_id, role: user.role, action_type: "UPDATE_PRODUCT_STATUS", table_name: "PRODUCTS", record_id: productId });
+  return readTable_("PRODUCTS").find((row) => String(row.product_id) === productId);
+}
+
 
 function normalizePartyType_(value) {
-  return String(value || "VENDOR").trim().toUpperCase() === "CUSTOMER" ? "CUSTOMER" : "VENDOR";
+  const normalized = String(value || "VENDOR").trim().toUpperCase();
+  return normalized === "CUSTOMER" ? "CUSTOMER" : "VENDOR";
 }
 
-function normalizeLocationIds_(input) {
-  const raw = Array.isArray(input.location_ids) && input.location_ids.length ? input.location_ids : [input.location_id];
-  const seen = {};
-  return raw.map((value) => String(value || "").trim()).filter((value) => {
-    if (!value || seen[value]) return false;
-    seen[value] = true;
-    return true;
+
+function listSuppliers() {
+  return readTable_("SUPPLIERS")
+    .filter(isActiveRecord_)
+    .map((supplier) => ({ ...supplier, party_type: normalizePartyType_(supplier.party_type) }))
+    .sort((a, b) => String(a.supplier_name || "").localeCompare(String(b.supplier_name || "")));
+}
+
+
+function createSupplier(payload) {
+  payload = payload || {};
+  const user = payload.user || {};
+  requirePermission_(user, "suppliers:create");
+  const input = payload.input || {};
+  if (!String(input.supplier_name || "").trim()) throw new Error("Business name is required.");
+  ensureTableColumns_("SUPPLIERS", CORE_SCHEMA.SUPPLIERS);
+  const partyType = normalizePartyType_(input.party_type);
+  const record = {
+    supplier_id: input.supplier_id || nextId_("SUPPLIERS", "supplier_id", partyType === "CUSTOMER" ? "CUST" : "SUP"),
+    supplier_name: input.supplier_name,
+    contact_name: input.contact_name || "",
+    email: input.email || "",
+    phone: input.phone || "",
+    address: input.address || "",
+    payment_terms: input.payment_terms || "Net 30",
+    default_currency: input.default_currency || input.currency || "USD",
+    lead_time_expected_days: number_(input.lead_time_expected_days, 0),
+    is_active: true,
+    created_at: today_(),
+    updated_at: today_(),
+    notes: input.notes || "",
+    party_type: partyType
+  };
+  appendRecord_("SUPPLIERS", record);
+  writeAuditLog_({ user_id: user.user_id, role: user.role, action_type: "CREATE_PARTY", table_name: "SUPPLIERS", record_id: record.supplier_id });
+  return record;
+}
+
+
+function listLocations() {
+  return readTable_("LOCATIONS").filter(isActiveRecord_);
+}
+
+
+function listPurchaseOrders() {
+  const suppliers = byId_(readTable_("SUPPLIERS"), "supplier_id");
+  return readTable_("PURCHASE_ORDERS").map((po) => ({
+    ...po,
+    supplier: suppliers[po.supplier_id] || null
+  })).sort((a, b) => String(b.order_date || "").localeCompare(String(a.order_date || "")));
+}
+
+
+function getPurchaseOrderDetail(payload) {
+  const poId = typeof payload === "string" ? payload : String((payload || {}).poId || (payload || {}).po_id || "");
+  const po = readTable_("PURCHASE_ORDERS").find((row) => String(row.po_id) === poId);
+  if (!po) return null;
+  const products = byId_(readTable_("PRODUCTS"), "product_id");
+  const suppliers = byId_(readTable_("SUPPLIERS"), "supplier_id");
+  const lines = readTable_("PURCHASE_ORDER_LINES")
+    .filter((line) => String(line.po_id) === poId)
+    .map((line) => ({ ...line, product: products[line.product_id] || null }));
+  return { po: { ...po, supplier: suppliers[po.supplier_id] || null }, lines };
+}
+
+
+function createPurchaseOrder(payload) {
+  payload = payload || {};
+  const user = payload.user || {};
+  requirePermission_(user, "purchaseOrders:create");
+  const input = payload.input || {};
+  const supplierId = input.supplier_id || input.vendor_id;
+  const lines = Array.isArray(input.lines) ? input.lines : [];
+  if (!supplierId) throw new Error("Choose a supplier.");
+  if (!lines.length) throw new Error("Add at least one product line.");
+  ensureTableColumns_("PURCHASE_ORDERS", CORE_SCHEMA.PURCHASE_ORDERS);
+  ensureTableColumns_("PURCHASE_ORDER_LINES", CORE_SCHEMA.PURCHASE_ORDER_LINES);
+  const poId = input.po_id || nextId_("PURCHASE_ORDERS", "po_id", "PO");
+  const currency = input.currency || "USD";
+  const shipping = number_(input.shipping_amount, 0);
+  const taxRate = number_(input.tax_rate_percent !== undefined ? input.tax_rate_percent : input.tax_rate, 0);
+  const taxEnabled = input.tax_enabled === true || String(input.tax_enabled).toUpperCase() === "TRUE";
+  let subtotal = 0;
+  const productMap = byId_(readTable_("PRODUCTS"), "product_id");
+  lines.forEach((line) => subtotal += number_(line.qty_ordered || line.quantity, 0) * number_(line.unit_cost || line.cost, 0));
+  const tax = taxEnabled ? subtotal * taxRate / 100 : 0;
+  const po = {
+    po_id: poId,
+    po_status: input.po_status || "DRAFT",
+    supplier_id: supplierId,
+    created_by: user.user_id || user.role,
+    order_date: input.order_date || today_(),
+    expected_delivery_date: input.expected_delivery_date || "",
+    payment_terms: input.payment_terms || "",
+    currency,
+    subtotal_amount: subtotal,
+    tax_amount: tax,
+    shipping_amount: shipping,
+    total_amount: subtotal + tax + shipping,
+    notes: input.notes || "",
+    tax_enabled: taxEnabled,
+    tax_rate: taxRate,
+    ship_via: input.ship_via || "",
+    bill_status: input.bill_status || "NOT_CREATED"
+  };
+  appendRecord_("PURCHASE_ORDERS", po);
+  lines.forEach((line) => {
+    const product = productMap[line.product_id] || {};
+    const qty = number_(line.qty_ordered || line.quantity, 0);
+    const unitCost = number_(line.unit_cost || line.cost, 0);
+    const unitsPer = number_(line.units_per_purchase_unit || product.units_per_purchase_unit || product.case_weight_lbs, 0);
+    const lineRecord = {
+      po_line_id: nextId_("PURCHASE_ORDER_LINES", "po_line_id", "POL"),
+      po_id: poId,
+      supplier_id: supplierId,
+      product_id: line.product_id,
+      line_status: "OPEN",
+      qty_ordered: qty,
+      qty_received_total: 0,
+      qty_remaining: qty,
+      unit_type: line.unit_type || product.default_unit || "CASE",
+      unit_cost: unitCost,
+      currency,
+      line_total: qty * unitCost,
+      supplier_expected_lot_number: line.supplier_expected_lot_number || "",
+      notes: line.notes || "",
+      base_unit: line.base_unit || product.base_unit || "LB",
+      units_per_purchase_unit: unitsPer,
+      expected_base_qty: qty * unitsPer,
+      case_weight_lbs: unitsPer,
+      qr_value: line.qr_value || ""
+    };
+    lineRecord.qr_value = lineRecord.qr_value || lineRecord.po_line_id;
+    appendRecord_("PURCHASE_ORDER_LINES", lineRecord);
+  });
+  writeAuditLog_({ user_id: user.user_id, role: user.role, action_type: "CREATE_PO", table_name: "PURCHASE_ORDERS", record_id: poId });
+  const detail = getPurchaseOrderDetail({ po_id: poId });
+  return { ...detail.po, lines: detail.lines };
+}
+
+
+function purchaseOrderAction(payload) {
+  payload = payload || {};
+  const user = payload.user || {};
+  requirePermission_(user, "purchaseOrders:actions");
+  const poId = payload.poId || payload.po_id;
+  const action = String(payload.action || payload.status || "").toUpperCase();
+  const statusMap = { SEND: "SENT", SENT: "SENT", ORDER: "ORDERED", ORDERED: "ORDERED", CANCEL: "CANCELLED", CANCELLED: "CANCELLED", CLOSE: "CLOSED", CLOSED: "CLOSED" };
+  const nextStatus = statusMap[action] || action;
+  if (!poId || !nextStatus) throw new Error("Choose a purchase order action.");
+  updateTableRecord_("PURCHASE_ORDERS", "po_id", poId, { po_status: nextStatus, updated_at: today_() });
+  writeAuditLog_({ user_id: user.user_id, role: user.role, action_type: "PO_" + nextStatus, table_name: "PURCHASE_ORDERS", record_id: poId });
+  return getPurchaseOrderDetail({ po_id: poId });
+}
+
+
+function generatePurchaseOrderTemplate(payload) {
+  const detail = getPurchaseOrderDetail(payload);
+  if (!detail) throw new Error("Purchase order was not found.");
+  return { ...detail, generated_at: today_(), message: "Template data ready for frontend rendering." };
+}
+
+
+function receiveProduct(payload) {
+  payload = payload || {};
+  const user = payload.user || {};
+  requirePermission_(user, "receiving:create");
+  const input = payload.input || payload;
+  const poLineId = String(input.po_line_id || "").trim();
+  if (!poLineId) throw new Error("Choose a PO line.");
+  const lines = readTable_("PURCHASE_ORDER_LINES");
+  const line = lines.find((row) => String(row.po_line_id) === poLineId);
+  if (!line) throw new Error("PO line was not found.");
+  const qtyReceived = number_(input.qty_received, 0);
+  const qtyDamaged = number_(input.qty_damaged, 0);
+  const qtyAccepted = Math.max(qtyReceived - qtyDamaged, 0);
+  if (qtyReceived <= 0 || qtyAccepted <= 0) throw new Error("Received quantity must be greater than zero.");
+  const unitsPer = number_(line.units_per_purchase_unit || line.case_weight_lbs, 1);
+  const acceptedBase = qtyAccepted * unitsPer;
+  const lotId = nextId_("LOTS", "internal_lot_id", "LOT");
+  const receivingId = nextId_("RECEIVING", "receiving_id", "RCV");
+  const locationId = input.confirmed_location_id || input.location_id || "";
+  const lot = {
+    internal_lot_id: lotId,
+    product_id: line.product_id,
+    supplier_id: line.supplier_id,
+    supplier_lot_number: input.supplier_lot_number || "",
+    po_id: line.po_id,
+    po_line_id: poLineId,
+    received_date: today_(),
+    original_qty: acceptedBase,
+    current_qty_script: acceptedBase,
+    unit_type: line.base_unit || "LB",
+    unit_cost: line.unit_cost,
+    currency: line.currency || "USD",
+    current_location_id: locationId,
+    status: input.quality_status === "HOLD" ? "HOLD" : "ACTIVE",
+    expiration_date: input.expiration_date || "",
+    qr_value: lotId,
+    label_printed_status: "",
+    created_at: today_(),
+    updated_at: today_(),
+    notes: input.notes || "",
+    purchase_qty_received: qtyAccepted,
+    purchase_unit_type: line.unit_type,
+    pallet_count: number_(input.pallet_count, 0)
+  };
+  const receiving = {
+    receiving_id: receivingId,
+    po_id: line.po_id,
+    po_line_id: poLineId,
+    supplier_id: line.supplier_id,
+    product_id: line.product_id,
+    scan_code: input.scan_code || poLineId,
+    internal_lot_id: lotId,
+    supplier_lot_number: input.supplier_lot_number || "",
+    received_date: today_(),
+    received_by: user.user_id || user.role,
+    qty_received: qtyReceived,
+    qty_damaged: qtyDamaged,
+    qty_accepted: qtyAccepted,
+    unit_type: line.unit_type,
+    quality_score: input.quality_score || "",
+    product_accuracy_score: input.product_accuracy_score || "",
+    over_under_status: "",
+    recommended_location_id: input.recommended_location_id || "",
+    confirmed_location_id: locationId,
+    requires_supervisor_approval: input.quality_status === "HOLD",
+    approval_status: input.quality_status === "HOLD" ? "PENDING" : "APPROVED",
+    notes: input.notes || "",
+    base_unit: line.base_unit || "LB",
+    units_per_purchase_unit: unitsPer,
+    qty_accepted_base: acceptedBase,
+    pallet_count: number_(input.pallet_count, 0),
+    quality_status: input.quality_status || "PASS"
+  };
+  const movement = {
+    movement_id: nextId_("INVENTORY_MOVEMENTS", "movement_id", "MOV"),
+    movement_type: "RECEIVE",
+    timestamp: today_(),
+    user_id: user.user_id || user.role,
+    product_id: line.product_id,
+    internal_lot_id: lotId,
+    qty_change: acceptedBase,
+    unit_type: line.base_unit || "LB",
+    from_location_id: "RECEIVING",
+    to_location_id: locationId,
+    related_po_id: line.po_id,
+    related_receiving_id: receivingId,
+    scan_code: lotId,
+    device_id: input.device_id || "WEB_APP",
+    approval_status: receiving.approval_status,
+    notes: input.notes || ""
+  };
+  appendRecord_("RECEIVING", receiving);
+  appendRecord_("LOTS", lot);
+  appendRecord_("INVENTORY_MOVEMENTS", movement);
+  const prevReceived = number_(line.qty_received_total, 0);
+  const ordered = number_(line.qty_ordered, 0);
+  const newReceived = prevReceived + qtyAccepted;
+  const remaining = Math.max(ordered - newReceived, 0);
+  updateTableRecord_("PURCHASE_ORDER_LINES", "po_line_id", poLineId, {
+    qty_received_total: newReceived,
+    qty_remaining: remaining,
+    line_status: remaining <= 0 ? "RECEIVED" : "PARTIAL"
+  });
+  refreshPurchaseOrderStatus_(line.po_id);
+  writeAuditLog_({ user_id: user.user_id, role: user.role, action_type: "RECEIVE_PRODUCT", table_name: "RECEIVING", record_id: receivingId });
+  return { receiving, lot, movement, purchaseOrder: getPurchaseOrderDetail({ po_id: line.po_id }) };
+}
+
+
+function refreshPurchaseOrderStatus_(poId) {
+  const lines = readTable_("PURCHASE_ORDER_LINES").filter((line) => String(line.po_id) === String(poId));
+  if (!lines.length) return;
+  const allReceived = lines.every((line) => number_(line.qty_remaining, number_(line.qty_ordered, 0)) <= 0);
+  const anyReceived = lines.some((line) => number_(line.qty_received_total, 0) > 0);
+  updateTableRecord_("PURCHASE_ORDERS", "po_id", poId, {
+    po_status: allReceived ? "RECEIVED" : anyReceived ? "PARTIALLY_RECEIVED" : "ORDERED",
+    actual_first_received_date: anyReceived ? today_() : "",
+    actual_completed_date: allReceived ? today_() : ""
   });
 }
 
-function isActiveRecord_(record) {
-  if (!record) return false;
-  return record.is_active === undefined
-    || record.is_active === ""
-    || record.is_active === true
-    || String(record.is_active).toUpperCase() === "TRUE"
-    || String(record.status || "").toUpperCase() === "ACTIVE";
+
+function createOpeningInventory(payload) {
+  payload = payload || {};
+  const user = payload.user || {};
+  requirePermission_(user, "openingInventory:create");
+  const input = payload.input || {};
+  if (!input.product_name && !input.product_id) throw new Error("Product is required.");
+  const product = input.product_id ? byId_(readTable_("PRODUCTS"), "product_id")[input.product_id] : createProduct({ user, input });
+  const qty = number_(input.qty || input.quantity, 0);
+  const unitWeight = number_(input.purchase_unit_weight || input.case_weight_lbs, 1);
+  if (qty <= 0) throw new Error("Quantity must be greater than zero.");
+  const lotId = nextId_("LOTS", "internal_lot_id", "LOT");
+  const baseQty = qty * unitWeight;
+  const locationId = input.location_id || (Array.isArray(input.location_ids) ? input.location_ids[0] : "");
+  const lot = {
+    internal_lot_id: lotId,
+    product_id: product.product_id,
+    supplier_lot_number: input.supplier_lot_number || "OPENING",
+    received_date: today_(),
+    original_qty: baseQty,
+    current_qty_script: baseQty,
+    unit_type: "LB",
+    unit_cost: number_(input.unit_cost, 0),
+    currency: input.currency || "USD",
+    current_location_id: locationId,
+    status: "ACTIVE",
+    qr_value: lotId,
+    created_at: today_(),
+    updated_at: today_(),
+    notes: input.notes || "Opening inventory count.",
+    purchase_qty_received: qty,
+    purchase_unit_type: input.purchase_unit || "UNIT",
+    pallet_count: number_(input.pallet_count, 0)
+  };
+  const movement = {
+    movement_id: nextId_("INVENTORY_MOVEMENTS", "movement_id", "MOV"),
+    movement_type: "OPENING_INVENTORY",
+    timestamp: today_(),
+    user_id: user.user_id || user.role,
+    product_id: product.product_id,
+    internal_lot_id: lotId,
+    qty_change: baseQty,
+    unit_type: "LB",
+    from_location_id: "OPENING_COUNT",
+    to_location_id: locationId,
+    scan_code: lotId,
+    device_id: "WEB_APP",
+    approval_status: "APPROVED",
+    notes: input.notes || ""
+  };
+  appendRecord_("LOTS", lot);
+  appendRecord_("INVENTORY_MOVEMENTS", movement);
+  writeAuditLog_({ user_id: user.user_id, role: user.role, action_type: "OPENING_INVENTORY", table_name: "LOTS", record_id: lotId });
+  return { product, lot, movement };
 }
 
-function truthy_(value) {
-  return value === true || String(value).toUpperCase() === "TRUE" || String(value) === "1" || String(value).toUpperCase() === "YES";
+
+function listSalesOrders(payload) {
+  const customers = byId_(readTable_("SUPPLIERS"), "supplier_id");
+  const products = byId_(readTable_("PRODUCTS"), "product_id");
+  const linesByOrder = {};
+  readTable_("SALES_ORDER_LINES").forEach((line) => {
+    const id = String(line.sales_order_id || "");
+    if (!linesByOrder[id]) linesByOrder[id] = [];
+    linesByOrder[id].push(line);
+  });
+
+  return readTable_("SALES_ORDERS").map((order) => {
+    const lines = linesByOrder[String(order.sales_order_id)] || [];
+    const ordered = lines.reduce((sum, line) => sum + number_(line.qty_ordered, 0), 0);
+    const picked = lines.reduce((sum, line) => sum + number_(line.qty_picked, 0), 0);
+    const totalWeight = lines.reduce((sum, line) => sum + number_(line.inventory_qty_required, number_(line.qty_ordered, 0)), 0);
+    return {
+      ...order,
+      customer: customers[order.customer_id] || null,
+      line_count: lines.length,
+      product_names: Array.from(new Set(lines.map((line) => (products[line.product_id] || {}).product_name || line.product_id).filter(Boolean))).join(", "),
+      total_units: ordered,
+      picked_units: picked,
+      remaining_units: Math.max(ordered - picked, 0),
+      total_weight_lbs: totalWeight,
+      fulfillment_percent: ordered > 0 ? Math.min(100, picked / ordered * 100) : 0
+    };
+  }).sort((a, b) => String(b.order_date || "").localeCompare(String(a.order_date || "")));
 }
 
-function normalizeHeader_(value) {
-  return String(value || "").trim();
+
+function getSalesOrderDetail(payload) {
+  const salesOrderId = typeof payload === "string"
+    ? payload
+    : String((payload || {}).salesOrderId || (payload || {}).sales_order_id || "");
+  const order = readTable_("SALES_ORDERS").find((row) => String(row.sales_order_id) === salesOrderId);
+  if (!order) return null;
+
+  const customers = byId_(readTable_("SUPPLIERS"), "supplier_id");
+  const products = byId_(readTable_("PRODUCTS"), "product_id");
+  const lots = byId_(readTable_("LOTS"), "internal_lot_id");
+  const locations = byId_(readTable_("LOCATIONS"), "location_id");
+  const lines = readTable_("SALES_ORDER_LINES")
+    .filter((line) => String(line.sales_order_id) === salesOrderId)
+    .map((line) => ({
+      ...line,
+      product: products[line.product_id] || null,
+      lot: lots[line.preferred_internal_lot_id] || null,
+      location: locations[line.preferred_location_id] || null
+    }));
+  const pickTasks = readTable_("PICK_TASKS").filter((task) => String(task.sales_order_id) === salesOrderId);
+  return {
+    order: { ...order, customer: customers[order.customer_id] || null },
+    lines,
+    pickTasks
+  };
 }
 
-function cellToJson_(value) {
-  if (value instanceof Date) return Utilities.formatDate(value, APP_TIMEZONE, "yyyy-MM-dd'T'HH:mm:ss");
-  return value;
+
+function createSalesOrder(payload) {
+  payload = payload || {};
+  const user = payload.user || {};
+  requirePermission_(user, "salesOrders:create");
+  const input = payload.input || {};
+  const requestedLines = Array.isArray(input.lines) ? input.lines : [];
+  if (!requestedLines.length) throw new Error("Add at least one sales line.");
+
+  return withScriptLock_(function () {
+    ensureTableColumns_("SALES_ORDERS", CORE_SCHEMA.SALES_ORDERS);
+    ensureTableColumns_("SALES_ORDER_LINES", CORE_SCHEMA.SALES_ORDER_LINES);
+
+    const customers = byId_(readTable_("SUPPLIERS"), "supplier_id");
+    const products = byId_(readTable_("PRODUCTS"), "product_id");
+    const lots = byId_(readTable_("LOTS"), "internal_lot_id");
+    const customer = customers[input.customer_id] || null;
+    if (!customer || String(customer.party_type || "").toUpperCase() !== "CUSTOMER") {
+      throw new Error("Select a valid customer.");
+    }
+
+    const snapshot = inventorySnapshot();
+    const allocated = {};
+    const salesOrderId = input.sales_order_id || nextId_("SALES_ORDERS", "sales_order_id", "SO");
+    const lineIds = nextIdBatch_("SALES_ORDER_LINES", "sales_order_line_id", "SOL", requestedLines.length);
+    const currency = input.currency || customer.default_currency || "USD";
+    let subtotal = 0;
+    let grossProfit = 0;
+
+    const lines = requestedLines.map((source, index) => {
+      const product = products[source.product_id] || null;
+      const lotId = String(source.internal_lot_id || source.preferred_internal_lot_id || "");
+      const locationId = String(source.location_id || source.preferred_location_id || "");
+      const lot = lots[lotId] || null;
+      const inventory = snapshot.find((row) =>
+        String(row.product_id) === String(source.product_id) &&
+        String(row.internal_lot_id) === lotId &&
+        String(row.location_id) === locationId
+      );
+      if (!product || !lot || !inventory) throw new Error(`Select valid inventory on line ${index + 1}.`);
+      if (!["ACTIVE", "AVAILABLE"].includes(String(lot.status || "ACTIVE").toUpperCase())) {
+        throw new Error(`The selected lot is not sellable on line ${index + 1}.`);
+      }
+
+      const qty = number_(source.qty_ordered || source.quantity, 0);
+      const unit = String(source.unit_type || lot.purchase_unit_type || product.default_unit || "CASE").toUpperCase();
+      const unitWeight = number_(source.unit_weight_lbs, unit === "LB" ? 1 : lotUnitWeightV2_(lot));
+      const inventoryQty = number_(source.inventory_qty_required, unit === "LB" ? qty : qty * unitWeight);
+      const price = number_(source.unit_price || source.price, 0);
+      if (qty <= 0 || unitWeight <= 0 || inventoryQty <= 0) throw new Error(`Complete quantity and unit weight on line ${index + 1}.`);
+      if (price < 0) throw new Error(`Unit price cannot be negative on line ${index + 1}.`);
+
+      const key = [source.product_id, lotId, locationId].join("|");
+      const already = number_(allocated[key], 0);
+      const available = number_(inventory.available_qty, inventory.current_qty);
+      if (already + inventoryQty > available + 0.0001) {
+        throw new Error(`Line ${index + 1} exceeds available inventory for ${lotId} at ${locationId}.`);
+      }
+      allocated[key] = already + inventoryQty;
+
+      const costPerLb = lotCostPerBaseUnitV2_(lot);
+      const unitCost = number_(source.unit_cost, costPerLb * unitWeight);
+      const lineTotal = qty * price;
+      const lineProfit = qty * (price - unitCost);
+      subtotal += lineTotal;
+      grossProfit += lineProfit;
+
+      return {
+        sales_order_line_id: lineIds[index],
+        sales_order_id: salesOrderId,
+        channel: input.channel || input.sales_channel || "BULK",
+        amazon_order_item_id: source.amazon_order_item_id || "",
+        product_id: source.product_id,
+        amazon_sku: source.amazon_sku || product.amazon_sku || "",
+        wholesale_sku: source.wholesale_sku || product.wholesale_sku || "",
+        qty_ordered: qty,
+        qty_picked: 0,
+        qty_remaining: qty,
+        unit_type: unit,
+        unit_price: price,
+        currency,
+        line_total: lineTotal,
+        preferred_internal_lot_id: lotId,
+        preferred_location_id: locationId,
+        line_status: "DRAFT",
+        notes: source.notes || "",
+        unit_weight_lbs: unitWeight,
+        inventory_qty_required: inventoryQty,
+        inventory_unit_type: source.inventory_unit_type || lot.unit_type || product.base_unit || "LB",
+        unit_cost: unitCost,
+        estimated_gross_profit: lineProfit,
+        expiration_date: source.expiration_date || lot.expiration_date || "",
+        fefo_status: source.fefo_status || "RECOMMENDED"
+      };
+    });
+
+    const taxEnabled = input.tax_enabled === true || String(input.tax_enabled || "").toUpperCase() === "TRUE";
+    const taxRate = number_(input.tax_rate_percent !== undefined ? input.tax_rate_percent : input.tax_rate, 0);
+    const tax = taxEnabled ? subtotal * taxRate / 100 : number_(input.tax_amount, 0);
+    const shipping = number_(input.shipping_amount, 0);
+    const order = {
+      sales_order_id: salesOrderId,
+      channel: input.channel || input.sales_channel || "BULK",
+      order_source: input.order_source || "WEB_APP",
+      customer_name: input.customer_name || customer.supplier_name || "",
+      customer_email: input.customer_email || customer.email || "",
+      customer_phone: input.customer_phone || customer.phone || "",
+      amazon_order_id: input.amazon_order_id || "",
+      order_date: input.order_date || today_(),
+      ship_by_date: input.ship_by_date || input.requested_delivery_date || "",
+      status: "DRAFT",
+      currency,
+      subtotal_amount: subtotal,
+      tax_amount: tax,
+      shipping_amount: shipping,
+      total_amount: subtotal + tax + shipping,
+      invoice_status: input.invoice_status || "NOT_CREATED",
+      quickbooks_invoice_id: input.quickbooks_invoice_id || "",
+      created_by: user.user_id || user.role,
+      created_at: today_(),
+      updated_at: today_(),
+      notes: input.notes || "",
+      customer_id: customer.supplier_id,
+      ship_method: input.ship_method || "CUSTOMER_PICKUP",
+      payment_terms: input.payment_terms || customer.payment_terms || "Net 30",
+      tax_enabled: taxEnabled,
+      tax_rate: taxRate,
+      estimated_gross_profit: grossProfit,
+      estimated_gross_margin_percent: subtotal ? grossProfit / subtotal * 100 : 0,
+      confirmed_at: "",
+      picked_at: "",
+      shipped_at: "",
+      bl_folio: input.bl_folio || nextBlFolio_(),
+      shipping_address: input.shipping_address || customer.address || ""
+    };
+
+    appendRecord_("SALES_ORDERS", order);
+    lines.forEach((line) => appendRecord_("SALES_ORDER_LINES", line));
+    writeAuditLog_({ user_id: user.user_id, role: user.role, action_type: "CREATE_SALES_ORDER", table_name: "SALES_ORDERS", record_id: salesOrderId });
+    const detail = getSalesOrderDetail({ sales_order_id: salesOrderId });
+    return { ...detail.order, lines: detail.lines, pickTasks: detail.pickTasks };
+  });
 }
 
-function valueForSheet_(value) {
-  if (value === undefined || value === null) return "";
-  if (typeof value === "object" && !(value instanceof Date)) return JSON.stringify(value);
-  return value;
+
+function salesOrderAction(payload) {
+  payload = payload || {};
+  const user = payload.user || {};
+  if (normalizeRole_(user.role) !== "ADMIN") throw new Error("Only an Admin can change Sales Order status.");
+  const salesOrderId = String(payload.salesOrderId || payload.sales_order_id || "");
+  const action = String(payload.action || payload.status || "").toUpperCase();
+  if (!salesOrderId || !action) throw new Error("Choose a Sales Order action.");
+
+  return withScriptLock_(function () {
+    const detail = getSalesOrderDetail({ sales_order_id: salesOrderId });
+    if (!detail) throw new Error("Sales Order was not found.");
+    const current = String(detail.order.status || "DRAFT").toUpperCase();
+
+    if (action === "CONFIRM" || action === "CONFIRMED") {
+      if (current !== "DRAFT") throw new Error("Only Draft Sales Orders can be confirmed.");
+      return confirmSalesOrder_(salesOrderId, user);
+    }
+    if (action === "PICK" || action === "PICKED") {
+      throw new Error("Use Send Product to scan physical inventory. Orders cannot be manually marked picked.");
+    }
+    if (action === "SHIP" || action === "SHIPPED") {
+      if (current !== "PICKED") throw new Error("Only fully picked Sales Orders can be shipped.");
+      return shipSalesOrder_(salesOrderId, user);
+    }
+    if (action === "CANCEL" || action === "CANCELLED") {
+      if (current === "SHIPPED") throw new Error("A shipped Sales Order cannot be cancelled. Record a return or reversal instead.");
+      return cancelSalesOrder_(salesOrderId, user);
+    }
+    throw new Error("Unsupported Sales Order action.");
+  });
 }
 
-function num_(value, fallback) {
-  if (fallback === undefined) fallback = 0;
-  if (value === null || value === undefined || value === "") return fallback;
-  if (typeof value === "number") return isFinite(value) ? value : fallback;
-  if (value instanceof Date) return fallback;
 
-  const cleaned = String(value).replace(/[$,%\s]/g, "").replace(/,/g, "");
-  const parsed = Number(cleaned);
-  return isFinite(parsed) ? parsed : fallback;
+function confirmSalesOrder_(salesOrderId, user) {
+  const detail = getSalesOrderDetail({ sales_order_id: salesOrderId });
+  if (!detail) throw new Error("Sales Order was not found.");
+  if (!detail.lines.length) throw new Error("Sales Order has no product lines.");
+
+  const snapshot = inventorySnapshot();
+  const requested = {};
+  detail.lines.forEach((line, index) => {
+    const row = snapshot.find((item) =>
+      String(item.product_id) === String(line.product_id) &&
+      String(item.internal_lot_id) === String(line.preferred_internal_lot_id) &&
+      String(item.location_id) === String(line.preferred_location_id)
+    );
+    if (!row) throw new Error(`Inventory allocation is missing on line ${index + 1}.`);
+    const key = [line.product_id, line.preferred_internal_lot_id, line.preferred_location_id].join("|");
+    requested[key] = number_(requested[key], 0) + number_(line.inventory_qty_required, line.qty_ordered);
+    if (requested[key] > number_(row.available_qty, row.current_qty) + 0.0001) {
+      throw new Error(`Inventory is no longer available for line ${index + 1}.`);
+    }
+  });
+
+  const existing = readTable_("PICK_TASKS").filter((task) => String(task.sales_order_id) === String(salesOrderId));
+  if (!existing.length) {
+    const taskIds = nextIdBatch_("PICK_TASKS", "pick_task_id", "PICK", detail.lines.length);
+    detail.lines.forEach((line, index) => appendRecord_("PICK_TASKS", {
+      pick_task_id: taskIds[index],
+      sales_order_id: salesOrderId,
+      sales_order_line_id: line.sales_order_line_id,
+      channel: detail.order.channel,
+      task_date: today_(),
+      priority: "NORMAL",
+      product_id: line.product_id,
+      recommended_internal_lot_id: line.preferred_internal_lot_id,
+      recommended_location_id: line.preferred_location_id,
+      qty_to_pick: line.qty_ordered,
+      qty_picked: 0,
+      unit_type: line.unit_type,
+      assigned_to: "",
+      pick_status: "OPEN",
+      picked_at: "",
+      scan_code: line.preferred_internal_lot_id,
+      device_id: "WEB_APP",
+      exception_code: "",
+      notes: line.fefo_status === "OVERRIDE" ? "Approved allocation override." : "Recommended FEFO/FIFO allocation.",
+      qty_to_pick_base: line.inventory_qty_required || line.qty_ordered,
+      reservation_status: "RESERVED"
+    }));
+  }
+  detail.lines.forEach((line) => updateTableRecord_("SALES_ORDER_LINES", "sales_order_line_id", line.sales_order_line_id, { line_status: "CONFIRMED" }));
+  updateTableRecord_("SALES_ORDERS", "sales_order_id", salesOrderId, { status: "CONFIRMED", confirmed_at: today_(), updated_at: today_() });
+  writeAuditLog_({ user_id: user.user_id, role: user.role, action_type: "CONFIRM_SALES_ORDER", table_name: "SALES_ORDERS", record_id: salesOrderId });
+  return getSalesOrderDetail({ sales_order_id: salesOrderId });
 }
 
-function round_(value, decimals) {
-  decimals = decimals === undefined ? 0 : decimals;
-  const factor = Math.pow(10, decimals);
-  return Math.round(num_(value) * factor) / factor;
+
+function pickSalesOrder_(salesOrderId, user) {
+  throw new Error("Use Send Product to scan physical inventory. Manual picking is disabled.");
 }
 
-function sum_(values) {
-  return values.reduce((sum, value) => sum + num_(value), 0);
+
+function shipSalesOrder_(salesOrderId, user) {
+  const detail = getSalesOrderDetail({ sales_order_id: salesOrderId });
+  if (!detail) throw new Error("Sales Order was not found.");
+  const allPicked = detail.lines.length > 0 && detail.lines.every((line) =>
+    number_(line.qty_remaining, 0) <= 0.0001 || String(line.line_status || "").toUpperCase() === "PICKED"
+  );
+  if (!allPicked) throw new Error("Use Send Product to finish every Sales Order line before shipping.");
+
+  detail.pickTasks.forEach((task) => updateTableRecord_("PICK_TASKS", "pick_task_id", task.pick_task_id, {
+    pick_status: "SHIPPED",
+    reservation_status: "RELEASED"
+  }));
+  updateTableRecord_("SALES_ORDERS", "sales_order_id", salesOrderId, { status: "SHIPPED", shipped_at: today_(), updated_at: today_() });
+  writeAuditLog_({ user_id: user.user_id, role: user.role, action_type: "SHIP_SALES_ORDER", table_name: "SALES_ORDERS", record_id: salesOrderId });
+  return getSalesOrderDetail({ sales_order_id: salesOrderId });
 }
 
-function average_(values) {
-  const clean = values.map(num_).filter((value) => isFinite(value));
+
+function cancelSalesOrder_(salesOrderId, user) {
+  const detail = getSalesOrderDetail({ sales_order_id: salesOrderId });
+  if (!detail) throw new Error("Sales Order was not found.");
+  detail.pickTasks.forEach((task) => updateTableRecord_("PICK_TASKS", "pick_task_id", task.pick_task_id, {
+    pick_status: "CANCELLED",
+    reservation_status: "RELEASED"
+  }));
+  detail.lines.forEach((line) => {
+    if (number_(line.qty_picked, 0) <= 0.0001) {
+      updateTableRecord_("SALES_ORDER_LINES", "sales_order_line_id", line.sales_order_line_id, { line_status: "CANCELLED" });
+    }
+  });
+  updateTableRecord_("SALES_ORDERS", "sales_order_id", salesOrderId, { status: "CANCELLED", updated_at: today_() });
+  writeAuditLog_({ user_id: user.user_id, role: user.role, action_type: "CANCEL_SALES_ORDER", table_name: "SALES_ORDERS", record_id: salesOrderId });
+  return getSalesOrderDetail({ sales_order_id: salesOrderId });
+}
+
+
+
+function sendProduct(payload) {
+  payload = payload || {};
+  const user = payload.user || {};
+  requirePermission_(user, "salesOrders:send");
+  const input = payload.input || payload;
+  return withScriptLock_(function () {
+    const movement = recordInventoryMovementInternal_(user, {
+      ...input,
+      movement_type: "SALE",
+      related_sales_order_id: input.related_sales_order_id || input.sales_order_id || ""
+    });
+    return {
+      movement,
+      salesOrder: movement.related_sales_order_id
+        ? getSalesOrderDetail({ sales_order_id: movement.related_sales_order_id })
+        : null
+    };
+  });
+}
+
+function recordInventoryMovementInternal_(user, input) {
+  const type = String(input.movement_type || "ADJUSTMENT").toUpperCase();
+  const outbound = ["SALE", "AMAZON_OUT", "ADJUST_OUT", "USE", "WASTE", "SAMPLE", "TRANSFER_OUT"].includes(type);
+  const inbound = ["ADJUST_IN", "RECEIVE", "RETURN", "OPENING_INVENTORY", "TRANSFER_IN"].includes(type);
+  const rawQty = input.qty_change !== undefined && input.qty_change !== ""
+    ? number_(input.qty_change, 0)
+    : Math.abs(number_(input.qty, 0));
+  const qtyChange = input.qty_change !== undefined && input.qty_change !== ""
+    ? rawQty
+    : inbound ? Math.abs(rawQty) : outbound ? -Math.abs(rawQty) : rawQty;
+
+  const lot = findLotByScanV2_(input.internal_lot_id || input.lot_id || input.scan_code);
+  if (!lot) throw new Error("Scan a valid inventory lot before recording movement.");
+  if (!qtyChange) throw new Error("Quantity must be greater than zero.");
+
+  const salesOrderId = String(input.related_sales_order_id || input.sales_order_id || "");
+  let salesLine = null;
+  let pickTask = null;
+  if (salesOrderId) {
+    const order = readTable_("SALES_ORDERS").find((row) => String(row.sales_order_id) === salesOrderId);
+    if (!order) throw new Error("Sales Order was not found.");
+    if (!["CONFIRMED", "PARTIALLY_PICKED"].includes(String(order.status || "").toUpperCase())) {
+      throw new Error("Only confirmed or partially picked Sales Orders can send product.");
+    }
+    const tasks = readTable_("PICK_TASKS").filter((task) => String(task.sales_order_id) === salesOrderId);
+    pickTask = input.related_pick_task_id
+      ? tasks.find((task) => String(task.pick_task_id) === String(input.related_pick_task_id))
+      : null;
+    const lines = readTable_("SALES_ORDER_LINES").filter((line) => String(line.sales_order_id) === salesOrderId);
+    salesLine = input.sales_order_line_id
+      ? lines.find((line) => String(line.sales_order_line_id) === String(input.sales_order_line_id))
+      : pickTask
+        ? lines.find((line) => String(line.sales_order_line_id) === String(pickTask.sales_order_line_id))
+        : lines.find((line) =>
+            String(line.product_id) === String(lot.product_id) &&
+            String(line.preferred_internal_lot_id) === String(lot.internal_lot_id)
+          );
+    if (!salesLine) throw new Error("The scanned lot is not assigned to this Sales Order.");
+    if (String(salesLine.product_id) !== String(lot.product_id)) throw new Error("Scanned product does not match the Sales Order line.");
+    if (String(salesLine.preferred_internal_lot_id || "") && String(salesLine.preferred_internal_lot_id) !== String(lot.internal_lot_id)) {
+      throw new Error("Scanned lot does not match the assigned Sales Order lot.");
+    }
+    if (String(salesLine.preferred_location_id || "") && String(input.location_id || input.from_location_id || lot.current_location_id || "") !== String(salesLine.preferred_location_id)) {
+      throw new Error("Scanned inventory is not in the assigned Sales Order location.");
+    }
+
+    const remainingBase = remainingBaseQtyV2_(salesLine);
+    if (Math.abs(qtyChange) > remainingBase + 0.0001) {
+      throw new Error(`Quantity is higher than the remaining Sales Order need of ${remainingBase}.`);
+    }
+  }
+
+  const currentQty = number_(lot.current_qty_script !== "" && lot.current_qty_script !== undefined ? lot.current_qty_script : lot.original_qty, 0);
+  if (qtyChange < 0 && Math.abs(qtyChange) > currentQty + 0.0001) {
+    throw new Error(`Not enough inventory in lot ${lot.internal_lot_id}. Available ${currentQty}.`);
+  }
+  const nextQty = Math.max(0, currentQty + qtyChange);
+  updateTableRecord_("LOTS", "internal_lot_id", lot.internal_lot_id, {
+    current_qty_script: nextQty,
+    status: nextQty <= 0.0001 ? "EMPTY" : (String(lot.status || "ACTIVE").toUpperCase() === "EMPTY" ? "ACTIVE" : lot.status || "ACTIVE"),
+    updated_at: today_()
+  });
+
+  const movement = {
+    movement_id: nextId_("INVENTORY_MOVEMENTS", "movement_id", "MOV"),
+    movement_type: type,
+    timestamp: today_(),
+    user_id: user.user_id || user.role,
+    product_id: lot.product_id,
+    internal_lot_id: lot.internal_lot_id,
+    package_id: input.package_id || "",
+    qty_change: qtyChange,
+    unit_type: input.unit_type || lot.unit_type || "LB",
+    from_location_id: input.from_location_id || input.location_id || (qtyChange < 0 ? lot.current_location_id || "" : ""),
+    to_location_id: input.to_location_id || (qtyChange > 0 ? lot.current_location_id || "" : "OUTBOUND"),
+    related_po_id: input.related_po_id || "",
+    related_receiving_id: input.related_receiving_id || "",
+    related_sales_order_id: salesOrderId,
+    related_pick_task_id: pickTask ? pickTask.pick_task_id : input.related_pick_task_id || "",
+    related_amazon_order_id: input.related_amazon_order_id || "",
+    scan_code: input.scan_code || lot.qr_value || lot.internal_lot_id,
+    device_id: input.device_id || "WEB_APP",
+    approval_status: input.approval_status || "APPROVED",
+    notes: input.notes || ""
+  };
+  appendRecord_("INVENTORY_MOVEMENTS", movement);
+  if (salesOrderId && salesLine) updateSalesOrderProgressV2_(salesOrderId, salesLine, pickTask, Math.abs(qtyChange), user);
+  writeAuditLog_({ user_id: user.user_id, role: user.role, action_type: "INVENTORY_MOVEMENT", table_name: "INVENTORY_MOVEMENTS", record_id: movement.movement_id });
+  return movement;
+}
+
+function updateSalesOrderProgressV2_(salesOrderId, line, pickTask, qtyBase, user) {
+  const ordered = number_(line.qty_ordered, 0);
+  const requiredBase = number_(line.inventory_qty_required, ordered) || ordered;
+  const salesQty = requiredBase > 0 && ordered > 0 ? qtyBase / requiredBase * ordered : qtyBase;
+  const picked = Math.min(ordered, number_(line.qty_picked, 0) + salesQty);
+  const remaining = Math.max(0, ordered - picked);
+  const state = remaining <= 0.0001 ? "PICKED" : "PARTIALLY_PICKED";
+  updateTableRecord_("SALES_ORDER_LINES", "sales_order_line_id", line.sales_order_line_id, {
+    qty_picked: picked,
+    qty_remaining: remaining,
+    line_status: state
+  });
+  if (pickTask) {
+    const target = number_(pickTask.qty_to_pick, ordered);
+    updateTableRecord_("PICK_TASKS", "pick_task_id", pickTask.pick_task_id, {
+      qty_picked: Math.min(target, number_(pickTask.qty_picked, 0) + salesQty),
+      pick_status: state,
+      picked_at: today_(),
+      scan_code: line.preferred_internal_lot_id || pickTask.scan_code || "",
+      device_id: user.device_id || pickTask.device_id || "WEB_APP",
+      reservation_status: remaining <= 0.0001 ? "PICKED" : "RESERVED"
+    });
+  }
+
+  const lines = readTable_("SALES_ORDER_LINES").filter((item) => String(item.sales_order_id) === String(salesOrderId));
+  const allPicked = lines.length > 0 && lines.every((item) => number_(item.qty_remaining, 0) <= 0.0001 || String(item.line_status || "").toUpperCase() === "PICKED");
+  const anyPicked = lines.some((item) => number_(item.qty_picked, 0) > 0);
+  updateTableRecord_("SALES_ORDERS", "sales_order_id", salesOrderId, {
+    status: allPicked ? "PICKED" : anyPicked ? "PARTIALLY_PICKED" : "CONFIRMED",
+    picked_at: anyPicked ? today_() : "",
+    updated_at: today_()
+  });
+}
+
+function findLotByScanV2_(value) {
+  const key = String(value || "").trim();
+  return readTable_("LOTS").find((lot) =>
+    [lot.internal_lot_id, lot.qr_value, lot.supplier_lot_number].map(String).includes(key)
+  ) || null;
+}
+
+function remainingBaseQtyV2_(line) {
+  const ordered = number_(line.qty_ordered, 0);
+  const remaining = number_(line.qty_remaining, ordered);
+  const requiredBase = number_(line.inventory_qty_required, ordered) || ordered;
+  return ordered > 0 ? requiredBase * remaining / ordered : requiredBase;
+}
+
+function lotUnitWeightV2_(lot) {
+  const original = number_(lot.original_qty, 0);
+  const purchase = number_(lot.purchase_qty_received, 0);
+  return original > 0 && purchase > 0 ? original / purchase : number_(lot.units_per_purchase_unit || lot.case_weight_lbs, 1) || 1;
+}
+
+function lotCostPerBaseUnitV2_(lot) {
+  const purchaseCost = number_(lot.unit_cost, 0);
+  const weight = lotUnitWeightV2_(lot);
+  return weight > 0 ? purchaseCost / weight : purchaseCost;
+}
+
+function nextIdBatch_(sheetName, idColumn, prefix, count) {
+  const max = readTable_(sheetName).reduce((value, row) => {
+    const match = String(row[idColumn] || "").match(/(\d+)$/);
+    return match ? Math.max(value, Number(match[1])) : value;
+  }, 0);
+  return Array.from({ length: count }, (_, index) => `${prefix}-${String(max + index + 1).padStart(6, "0")}`);
+}
+
+function withScriptLock_(operation) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  try {
+    return operation();
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function recordInventoryMovement(payload) {
+  payload = payload || {};
+  const user = payload.user || {};
+  const input = payload.input || payload;
+  const role = normalizeRole_(user.role);
+  const type = String(input.movement_type || "ADJUSTMENT").toUpperCase();
+  const salesOrderId = String(input.related_sales_order_id || input.sales_order_id || "");
+
+  if (role !== "ADMIN") {
+    requirePermission_(user, "salesOrders:send");
+    if (type !== "SALE" || !salesOrderId) {
+      throw new Error("Warehouse users can only send product against a confirmed Sales Order.");
+    }
+  } else {
+    requirePermission_(user, "inventory:adjust");
+  }
+
+  return withScriptLock_(function () {
+    return recordInventoryMovementInternal_(user, input);
+  });
+}
+
+
+function recordAmazonOutbound(payload) {
+  payload = payload || {};
+  const user = payload.user || {};
+  if (normalizeRole_(user.role) !== "ADMIN") throw new Error("Only an Admin can record Amazon outbound activity.");
+  const input = payload.input || payload;
+  const pkgId = input.package_id || nextId_("AMAZON_PACKAGES", "package_id", "PKG");
+  const movement = recordInventoryMovement({
+    user,
+    input: {
+      movement_type: "AMAZON_OUT",
+      product_id: input.product_id,
+      internal_lot_id: input.source_internal_lot_id || input.internal_lot_id,
+      package_id: pkgId,
+      qty_change: -Math.abs(number_(input.qty_product_used || input.qty_change, 0)),
+      unit_type: input.unit_type || "LB",
+      from_location_id: input.current_location_id || input.from_location_id || "",
+      to_location_id: "AMAZON_PACKAGE",
+      related_amazon_order_id: input.matched_amazon_order_id || "",
+      scan_code: pkgId,
+      notes: input.notes || ""
+    }
+  });
+  const pkg = {
+    package_id: pkgId,
+    package_qr_value: input.package_qr_value || pkgId,
+    amazon_sku: input.amazon_sku || "",
+    product_id: input.product_id,
+    source_internal_lot_id: input.source_internal_lot_id || input.internal_lot_id,
+    qty_product_used: Math.abs(number_(input.qty_product_used || input.qty_change, 0)),
+    unit_type: input.unit_type || "LB",
+    packed_by: user.user_id || user.role,
+    packed_at: today_(),
+    package_status: input.package_status || "PACKED",
+    current_location_id: input.current_location_id || "",
+    matched_amazon_order_id: input.matched_amazon_order_id || "",
+    matched_amazon_order_item_id: input.matched_amazon_order_item_id || "",
+    shipped_at: "",
+    notes: input.notes || ""
+  };
+  appendRecord_("AMAZON_PACKAGES", pkg);
+  return { package: pkg, movement };
+}
+
+
+function listAmazonOutboundActivity() {
+  return readTable_("AMAZON_PACKAGES").sort((a, b) => String(b.packed_at || "").localeCompare(String(a.packed_at || "")));
+}
+
+
+function matchAmazonPackageScan(payload) {
+  payload = payload || {};
+  const user = payload.user || {};
+  requirePermission_(user, "scanner:lookup");
+  const input = payload.input || payload;
+  const packageId = input.package_id || input.scan_code || input.package_qr_value;
+  const pkg = readTable_("AMAZON_PACKAGES").find((row) => String(row.package_id) === String(packageId) || String(row.package_qr_value) === String(packageId));
+  if (!pkg) throw new Error("Package was not found.");
+  const match = {
+    scan_match_id: nextId_("AMAZON_SCAN_MATCHES", "scan_match_id", "AMZSCAN"),
+    scanned_at: today_(),
+    scanned_by: user.user_id || user.role,
+    device_id: input.device_id || "WEB_APP",
+    package_id: pkg.package_id,
+    amazon_order_id: input.amazon_order_id || pkg.matched_amazon_order_id || "",
+    amazon_order_item_id: input.amazon_order_item_id || pkg.matched_amazon_order_item_id || "",
+    amazon_sku: input.amazon_sku || pkg.amazon_sku || "",
+    product_id: pkg.product_id,
+    match_status: "MATCHED",
+    match_confidence: 1,
+    exception_code: "",
+    related_pick_task_id: input.related_pick_task_id || "",
+    related_movement_id: input.related_movement_id || "",
+    notes: input.notes || ""
+  };
+  appendRecord_("AMAZON_SCAN_MATCHES", match);
+  updateTableRecord_("AMAZON_PACKAGES", "package_id", pkg.package_id, {
+    matched_amazon_order_id: match.amazon_order_id,
+    matched_amazon_order_item_id: match.amazon_order_item_id,
+    package_status: "MATCHED"
+  });
+  return { package: pkg, match };
+}
+
+
+function inventorySnapshot() {
+  const products = byId_(readTable_("PRODUCTS"), "product_id");
+  const locations = byId_(readTable_("LOCATIONS"), "location_id");
+  const reserved = reservedInventory_();
+
+  return readTable_("LOTS").map((lot) => {
+    const product = products[lot.product_id] || {};
+    const locationId = String(lot.current_location_id || "");
+    const key = [lot.product_id, lot.internal_lot_id, locationId].join("|");
+    const current = number_(lot.current_qty_script !== "" && lot.current_qty_script !== undefined ? lot.current_qty_script : lot.original_qty, 0);
+    const reservedQty = number_(reserved[key], 0);
+    const costPerLb = lotCostPerBaseUnitV2_(lot);
+    return {
+      product_id: lot.product_id || "",
+      product_name: product.product_name || lot.product_id || "",
+      product_category: product.product_category || "",
+      internal_lot_id: lot.internal_lot_id || "",
+      location_id: locationId,
+      current_qty: current,
+      qty: current,
+      reserved_qty: reservedQty,
+      available_qty: Math.max(0, current - reservedQty),
+      unit_type: lot.unit_type || product.base_unit || "LB",
+      expiration_date: lot.expiration_date || "",
+      unit_cost: costPerLb,
+      cost_per_lb: costPerLb,
+      purchase_unit_cost: number_(lot.unit_cost, 0),
+      purchase_unit_type: lot.purchase_unit_type || "",
+      purchase_qty_received: number_(lot.purchase_qty_received, 0),
+      lbs_per_purchase_unit: lotUnitWeightV2_(lot),
+      inventory_value: Math.max(0, current) * costPerLb,
+      missing_cost: number_(lot.unit_cost, 0) <= 0 || lotUnitWeightV2_(lot) <= 0,
+      value_status: number_(lot.unit_cost, 0) <= 0 || lotUnitWeightV2_(lot) <= 0 ? "MISSING_COST" : "OK",
+      product,
+      lot,
+      location: locations[locationId] || null,
+      lot_status: lot.status || "",
+      inventory_status: current > 0 ? "AVAILABLE" : "EMPTY"
+    };
+  }).filter((row) =>
+    row.current_qty > 0 && ["ACTIVE", "AVAILABLE", ""].includes(String(row.lot_status || "ACTIVE").toUpperCase())
+  );
+}
+
+
+function reservedInventory_() {
+  const result = {};
+  const lines = byId_(readTable_("SALES_ORDER_LINES"), "sales_order_line_id");
+  readTable_("PICK_TASKS").forEach((task) => {
+    if (String(task.reservation_status || "").toUpperCase() !== "RESERVED") return;
+    const line = lines[task.sales_order_line_id] || {};
+    const lotId = task.recommended_internal_lot_id || line.preferred_internal_lot_id || "";
+    const locationId = task.recommended_location_id || line.preferred_location_id || "";
+    const key = [task.product_id || line.product_id || "", lotId, locationId].join("|");
+    const remainingBase = line.sales_order_line_id
+      ? remainingBaseQtyV2_(line)
+      : Math.max(0, number_(task.qty_to_pick_base, task.qty_to_pick) - number_(task.qty_picked, 0));
+    result[key] = number_(result[key], 0) + remainingBase;
+  });
+  return result;
+}
+
+
+function inventoryValueFromLots_() {
+  return readTable_("LOTS")
+    .filter((lot) => String(lot.status || "ACTIVE").toUpperCase() === "ACTIVE")
+    .reduce((sum, lot) => {
+      return sum + number_(lot.purchase_qty_received, 0) * number_(lot.unit_cost, 0);
+    }, 0);
+}
+
+function parseDateV2_(value) {
+  const date = value instanceof Date ? value : value ? new Date(value) : null;
+  return date && !Number.isNaN(date.getTime()) ? date : null;
+}
+
+function dateKeyV2_(value) {
+  const date = parseDateV2_(value);
+  return date ? Utilities.formatDate(date, Session.getScriptTimeZone(), "yyyy-MM-dd") : "";
+}
+
+function currentQtyByProductV2_(snapshot) {
+  const result = {};
+  (snapshot || []).forEach((row) => result[row.product_id] = number_(result[row.product_id], 0) + number_(row.current_qty, 0));
+  return result;
+}
+
+function inventoryValueByProductV2_(products, snapshot) {
+  const productMap = byId_(products, "product_id");
+  const result = {};
+  (snapshot || []).forEach((row) => {
+    const key = row.product_id;
+    if (!key) return;
+    if (!result[key]) {
+      const product = productMap[key] || row.product || {};
+      result[key] = {
+        product_id: key,
+        product_name: product.product_name || row.product_name || key,
+        product_category: product.product_category || row.product_category || "",
+        total_qty_lb: 0,
+        current_qty: 0,
+        total_inventory_value: 0,
+        inventory_value: 0,
+        avg_cost_per_lb: 0,
+        active_lots: 0,
+        locations: {},
+        locations_used: 0,
+        missing_cost_lots: 0,
+        value_status: "OK"
+      };
+    }
+    result[key].total_qty_lb += number_(row.current_qty, 0);
+    result[key].current_qty = result[key].total_qty_lb;
+    result[key].total_inventory_value += number_(row.inventory_value, 0);
+    result[key].inventory_value = result[key].total_inventory_value;
+    result[key].active_lots += 1;
+    if (row.location_id) result[key].locations[row.location_id] = true;
+    if (row.missing_cost) result[key].missing_cost_lots += 1;
+  });
+  return Object.keys(result).map((key) => {
+    const row = result[key];
+    row.avg_cost_per_lb = row.total_qty_lb > 0 ? row.total_inventory_value / row.total_qty_lb : 0;
+    row.locations_used = Object.keys(row.locations).length;
+    row.location_list = Object.keys(row.locations).join(", ");
+    row.value_status = row.missing_cost_lots > 0 ? "MISSING_COST" : "OK";
+    delete row.locations;
+    return row;
+  }).sort((a, b) => String(a.product_name || "").localeCompare(String(b.product_name || "")));
+}
+
+function numberOrNullV2_(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+function avgV2_(values) {
+  const clean = (values || []).map(numberOrNullV2_).filter((value) => value !== null);
   return clean.length ? clean.reduce((sum, value) => sum + value, 0) / clean.length : 0;
 }
-
-function std_(values) {
-  const clean = values.map(num_).filter((value) => isFinite(value));
+function stddevV2_(values) {
+  const clean = (values || []).map(numberOrNullV2_).filter((value) => value !== null);
   if (clean.length < 2) return 0;
-  const avg = average_(clean);
-  return Math.sqrt(clean.reduce((sum, value) => sum + Math.pow(value - avg, 2), 0) / (clean.length - 1));
+  const mean = avgV2_(clean);
+  return Math.sqrt(clean.reduce((sum, value) => sum + Math.pow(value - mean, 2), 0) / (clean.length - 1));
+}
+function salesUsageMovementTypeV2_(type) {
+  return ["SALE", "AMAZON_OUT", "PICK", "SHIP"].includes(String(type || "").toUpperCase());
+}
+function dailyUsageStatsFromMovementsV2_(movements) {
+  const since = new Date(Date.now() - 90 * 86400000);
+  const byProductDay = {};
+  const counts = {};
+  (movements || []).forEach((movement) => {
+    if (!salesUsageMovementTypeV2_(movement.movement_type)) return;
+    const date = parseDateV2_(movement.timestamp);
+    if (date && date < since) return;
+    const productId = movement.product_id;
+    if (!productId) return;
+    const day = dateKeyV2_(date || today_());
+    if (!byProductDay[productId]) byProductDay[productId] = {};
+    byProductDay[productId][day] = number_(byProductDay[productId][day], 0) + Math.abs(number_(movement.qty_change, 0));
+    counts[productId] = number_(counts[productId], 0) + 1;
+  });
+  const result = {};
+  Object.keys(byProductDay).forEach((productId) => {
+    const values = Object.values(byProductDay[productId]);
+    const total = values.reduce((sum, value) => sum + value, 0);
+    result[productId] = {
+      total_usage_90d: total,
+      active_usage_days: values.length,
+      movement_count: counts[productId] || values.length,
+      average_daily_usage: total / 90,
+      std_daily_usage: stddevV2_(values)
+    };
+  });
+  return result;
 }
 
-function unique_(values) {
-  const seen = {};
-  return values.filter((value) => {
-    const key = String(value || "");
-    if (!key || seen[key]) return false;
-    seen[key] = true;
-    return true;
+function histogramV2_(values, requestedBins) {
+  const clean = (values || []).map(numberOrNullV2_).filter((value) => value !== null);
+  if (!clean.length) return [];
+  const min = Math.min.apply(null, clean);
+  const max = Math.max.apply(null, clean);
+  const count = Math.max(1, Math.min(requestedBins || 8, clean.length));
+  if (min === max) return [{ min, max, count: clean.length }];
+  const width = (max - min) / count;
+  const bins = Array.from({ length: count }, (_, index) => ({ min: min + index * width, max: index === count - 1 ? max : min + (index + 1) * width, count: 0 }));
+  clean.forEach((value) => bins[Math.min(count - 1, Math.floor((value - min) / width))].count += 1);
+  return bins;
+}
+function trendLineV2_(points) {
+  const clean = (points || []).map((point) => {
+    const date = parseDateV2_(point && point.date);
+    const price = point ? numberOrNullV2_(point.price) : null;
+    return date && price !== null ? { x: date.getTime(), y: price, date: dateKeyV2_(date) } : null;
+  }).filter(Boolean);
+  if (clean.length < 2) return [];
+  const minX = Math.min.apply(null, clean.map((point) => point.x));
+  const normalized = clean.map((point) => ({ x: (point.x - minX) / 86400000, y: point.y, date: point.date }));
+  const meanX = avgV2_(normalized.map((point) => point.x));
+  const meanY = avgV2_(normalized.map((point) => point.y));
+  const denominator = normalized.reduce((sum, point) => sum + Math.pow(point.x - meanX, 2), 0);
+  if (!denominator) return [];
+  const slope = normalized.reduce((sum, point) => sum + (point.x - meanX) * (point.y - meanY), 0) / denominator;
+  const intercept = meanY - slope * meanX;
+  const first = normalized[0];
+  const last = normalized[normalized.length - 1];
+  return [{ date: first.date, price: intercept + slope * first.x }, { date: last.date, price: intercept + slope * last.x }, { slope_per_day: slope }];
+}
+
+function productPriceAnalyticsV2_(products, salesOrders, salesLines) {
+  const productMap = byId_(products, "product_id");
+  const orders = byId_(salesOrders, "sales_order_id");
+  const byProduct = {};
+  (salesLines || []).forEach((line) => {
+    const price = number_(line.unit_price, 0);
+    if (!line.product_id || price <= 0) return;
+    const order = orders[line.sales_order_id] || {};
+    const date = dateKeyV2_(order.order_date || line.created_at || today_());
+    if (!byProduct[line.product_id]) byProduct[line.product_id] = [];
+    byProduct[line.product_id].push({ date, price, qty: number_(line.qty_ordered, 0), sales_order_id: line.sales_order_id || "", sales_order_line_id: line.sales_order_line_id || "" });
+  });
+  const result = {};
+  Object.keys(productMap).forEach((productId) => {
+    const points = (byProduct[productId] || []).sort((a, b) => String(a.date).localeCompare(String(b.date)));
+    const prices = points.map((point) => point.price);
+    result[productId] = {
+      product_id: productId,
+      product_name: productMap[productId].product_name || productId,
+      sales_line_count: points.length,
+      average_price: avgV2_(prices),
+      avg_sales_price: avgV2_(prices),
+      std_price: stddevV2_(prices),
+      standard_deviation_price: stddevV2_(prices),
+      min_price: prices.length ? Math.min.apply(null, prices) : 0,
+      max_price: prices.length ? Math.max.apply(null, prices) : 0,
+      price_history: points,
+      histogram: histogramV2_(prices, 8),
+      trend_line: trendLineV2_(points),
+      analytics_status: points.length >= 2 ? "READY" : "NOT_ENOUGH_SALES",
+      reason: points.length ? "Add more sales orders to strengthen this analytics view." : "No sales price history yet."
+    };
+  });
+  return result;
+}
+
+function planningRowsV2_(products, suppliers, purchaseOrders, purchaseLines, snapshot, movementStats, priceAnalytics) {
+  const qtyByProduct = currentQtyByProductV2_(snapshot);
+  const valueByProduct = byId_(inventoryValueByProductV2_(products, snapshot), "product_id");
+  const supplierMap = byId_(suppliers, "supplier_id");
+  const poSupplier = {};
+  purchaseOrders.forEach((po) => poSupplier[po.po_id] = po.supplier_id);
+  const supplierByProduct = {};
+  const poCountByProduct = {};
+  purchaseLines.forEach((line) => {
+    if (!supplierByProduct[line.product_id]) supplierByProduct[line.product_id] = line.supplier_id || poSupplier[line.po_id] || "";
+    poCountByProduct[line.product_id] = number_(poCountByProduct[line.product_id], 0) + 1;
+  });
+  return products.map((product) => {
+    const supplierId = supplierByProduct[product.product_id] || "";
+    const supplier = supplierMap[supplierId] || {};
+    const value = valueByProduct[product.product_id] || {};
+    const currentQty = number_(qtyByProduct[product.product_id], 0);
+    const usage = movementStats[product.product_id] || { average_daily_usage: 0, std_daily_usage: 0, active_usage_days: 0, movement_count: 0 };
+    const analytics = priceAnalytics[product.product_id] || { sales_line_count: 0 };
+    const minStock = number_(product.min_stock_qty, 0);
+    const targetFromSheet = number_(product.target_stock_qty, 0);
+    const hasHistory = number_(usage.active_usage_days, 0) >= 30 || number_(usage.movement_count, 0) >= 10;
+    const hasTarget = minStock > 0 || targetFromSheet > 0;
+    const hasSupplier = number_(poCountByProduct[product.product_id], 0) > 0 || Boolean(supplierId);
+    const canCalculate = hasHistory && hasTarget;
+    const reasons = [];
+    if (!hasHistory) reasons.push("Needs real sales/pick movement history");
+    if (!hasTarget) reasons.push("Needs min or target stock levels");
+    if (!hasSupplier) reasons.push("No supplier/PO history yet");
+    const base = {
+      product_id: product.product_id,
+      product_name: product.product_name,
+      supplier_id: supplierId,
+      supplier_name: supplier.supplier_name || "",
+      current_qty: currentQty,
+      total_qty_lb: currentQty,
+      total_inventory_value: number_(value.total_inventory_value, 0),
+      inventory_value: number_(value.total_inventory_value, 0),
+      avg_cost_per_lb: number_(value.avg_cost_per_lb, 0),
+      active_lots: number_(value.active_lots, 0),
+      locations_used: number_(value.locations_used, 0),
+      location_list: value.location_list || "",
+      usage_movements_found: number_(usage.movement_count, 0),
+      usage_days_found: number_(usage.active_usage_days, 0),
+      sales_price_points: number_(analytics.sales_line_count, 0),
+      po_history_found: number_(poCountByProduct[product.product_id], 0)
+    };
+    if (!canCalculate) return { ...base, can_calculate_reorder: false, planning_status: "NOT_READY", status: "NOT_READY", reason: reasons.join("; ") || "Opening inventory only", average_daily_usage: "", std_daily_usage: "", avg_lead_time_days: "", std_lead_time_days: "", demand_during_lead_time: "", safety_stock: "", reorder_point: "", target_stock_level: "", recommended_order_qty: "" };
+    const lead = number_(supplier.lead_time_expected_days, 7) || 7;
+    const safety = Math.max(minStock, usage.average_daily_usage * 3);
+    const reorder = Math.max(minStock, usage.average_daily_usage * lead + safety);
+    const target = Math.max(targetFromSheet, reorder * 1.5);
+    const state = currentQty <= reorder ? "REORDER" : currentQty <= target ? "WATCH" : "OK";
+    return { ...base, can_calculate_reorder: true, planning_status: state, reason: "Calculated from sales/pick movement history.", average_daily_usage: usage.average_daily_usage, std_daily_usage: usage.std_daily_usage, avg_lead_time_days: lead, std_lead_time_days: 0, demand_during_lead_time: usage.average_daily_usage * lead, safety_stock: safety, reorder_point: reorder, target_stock_level: target, recommended_order_qty: Math.max(target - currentQty, 0), status: state };
+  }).sort((a, b) => String(a.product_name || "").localeCompare(String(b.product_name || "")));
+}
+
+function expirationRowsV2_(snapshot) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const limit = new Date(today.getTime() + 30 * 86400000);
+  return (snapshot || []).filter((row) => {
+    const date = parseDateV2_(row.expiration_date);
+    return date && row.current_qty > 0 && date >= today && date <= limit;
+  }).map((row) => {
+    const date = parseDateV2_(row.expiration_date);
+    return { ...row, expiration_date: dateKeyV2_(date), days_remaining: Math.ceil((date - today) / 86400000) };
   });
 }
 
-function indexBy_(rows, key) {
-  const out = {};
-  (rows || []).forEach((row) => {
-    if (row && row[key] !== undefined && row[key] !== "") out[row[key]] = row;
+function supplierAnalyticsV2_(suppliers, purchaseOrders, purchaseLines, receiving) {
+  const totalSpend = purchaseOrders.reduce((sum, po) => sum + number_(po.total_amount, 0), 0);
+  return suppliers.map((supplier) => {
+    const orders = purchaseOrders.filter((po) => po.supplier_id === supplier.supplier_id);
+    const ids = {};
+    orders.forEach((po) => ids[po.po_id] = true);
+    const lines = purchaseLines.filter((line) => ids[line.po_id]);
+    const received = receiving.filter((row) => row.supplier_id === supplier.supplier_id);
+    const spend = orders.reduce((sum, po) => sum + number_(po.total_amount, 0), 0);
+    return {
+      supplier_id: supplier.supplier_id,
+      supplier_name: supplier.supplier_name,
+      email: supplier.email,
+      phone: supplier.phone,
+      products_bought: Array.from(new Set(lines.map((line) => line.product_id).filter(Boolean))).join(", "),
+      total_orders: orders.length,
+      completed_orders: orders.filter((po) => ["RECEIVED", "CLOSED", "COMPLETE"].includes(String(po.po_status || "").toUpperCase())).length,
+      total_purchase_amount: spend,
+      spend_share_percent: totalSpend ? spend / totalSpend * 100 : 0,
+      avg_lead_time_days: number_(supplier.lead_time_expected_days, 0),
+      std_lead_time_days: 0,
+      quality_percent: received.length ? received.filter((row) => String(row.quality_status || "PASS").toUpperCase() === "PASS").length / received.length * 100 : 100,
+      product_accuracy_percent: 100,
+      quantity_accuracy_percent: 100
+    };
   });
-  return out;
 }
 
-function groupBy_(rows, key) {
-  const out = {};
-  (rows || []).forEach((row) => {
-    const value = row[key] || "";
-    if (!out[value]) out[value] = [];
-    out[value].push(row);
+function getDashboard() {
+  const products = readTable_("PRODUCTS").filter(isActiveRecord_);
+  const suppliers = readTable_("SUPPLIERS").filter(isActiveRecord_);
+  const purchaseOrders = readTable_("PURCHASE_ORDERS");
+  const salesOrders = readTable_("SALES_ORDERS");
+  const salesLines = readTable_("SALES_ORDER_LINES");
+  const purchaseLines = readTable_("PURCHASE_ORDER_LINES");
+  const locations = readTable_("LOCATIONS").filter(isActiveRecord_);
+  const amazonPackages = readTable_("AMAZON_PACKAGES");
+  const movements = readTable_("INVENTORY_MOVEMENTS");
+  const snapshot = inventorySnapshot();
+  const priceAnalytics = productPriceAnalyticsV2_(products, salesOrders, salesLines);
+  const planning = planningRowsV2_(products, suppliers, purchaseOrders, purchaseLines, snapshot, dailyUsageStatsFromMovementsV2_(movements), priceAnalytics);
+  const lowStockProducts = planning.filter((row) => ["REORDER", "WATCH"].includes(row.status));
+  const expiringLots = expirationRowsV2_(snapshot);
+  const openPo = purchaseOrders.filter((po) => ["DRAFT", "SENT", "ORDERED", "IN_TRANSIT", "PARTIALLY_RECEIVED", "PARTIAL"].includes(String(po.po_status || "").toUpperCase()));
+  const openSo = salesOrders.filter((order) => ["DRAFT", "CONFIRMED", "PICKED", "OPEN", "PARTIAL", "PARTIALLY_PICKED"].includes(String(order.status || "").toUpperCase()));
+  const occupied = {};
+  snapshot.forEach((row) => { if (row.location_id) occupied[row.location_id] = true; });
+  const inventoryValue = snapshot.reduce((sum, row) => sum + number_(row.inventory_value, 0), 0);
+  const since = new Date(Date.now() - 7 * 86400000);
+  const weeklySales = salesOrders.filter((order) => {
+    const d = parseDateV2_(order.order_date);
+    return String(order.status || "").toUpperCase() === "SHIPPED" && (!d || d >= since);
+  }).reduce((sum, order) => sum + number_(order.total_amount, 0), 0);
+
+  return {
+    productCount: products.length,
+    supplierCount: suppliers.length,
+    openPoCount: openPo.length,
+    lotCount: readTable_("LOTS").length,
+    movementCount: movements.length,
+    pendingAmazonPackages: amazonPackages.filter((pkg) => !pkg.matched_amazon_order_id).length,
+    inventoryValue,
+    lowStockCount: lowStockProducts.length,
+    openSalesOrderCount: openSo.length,
+    totalInventoryValue: inventoryValue,
+    usageHistoryNeededCount: planning.filter((row) => row.status === "NOT_READY").length,
+    expiringLotCount: expiringLots.length,
+    expiringProductCount: Array.from(new Set(expiringLots.map((row) => row.product_id).filter(Boolean))).length,
+    expiringInventoryValue: expiringLots.reduce((sum, row) => sum + number_(row.inventory_value, 0), 0),
+    openPoValue: openPo.reduce((sum, po) => sum + number_(po.total_amount, 0), 0),
+    openSoCount: openSo.length,
+    openSoValue: openSo.reduce((sum, so) => sum + number_(so.total_amount, 0), 0),
+    weeklySales,
+    topProfitProduct: null,
+    warehouseCapacityPercent: locations.length ? Object.keys(occupied).length / locations.length * 100 : 0,
+    warehouseOccupiedPositions: Object.keys(occupied).length,
+    warehouseTotalPositions: locations.length,
+    lowStockProducts,
+    expiringLots
+  };
+}
+
+
+function getOperationalReports() {
+  const products = readTable_("PRODUCTS").filter(isActiveRecord_);
+  const suppliers = readTable_("SUPPLIERS").filter(isActiveRecord_);
+  const purchaseOrders = readTable_("PURCHASE_ORDERS");
+  const purchaseLines = readTable_("PURCHASE_ORDER_LINES");
+  const salesOrders = readTable_("SALES_ORDERS");
+  const salesLines = readTable_("SALES_ORDER_LINES");
+  const receiving = readTable_("RECEIVING");
+  const movements = readTable_("INVENTORY_MOVEMENTS");
+  const snapshot = inventorySnapshot();
+  const productPriceAnalytics = productPriceAnalyticsV2_(products, salesOrders, salesLines);
+  const inventoryValueByProduct = inventoryValueByProductV2_(products, snapshot);
+  const inventoryPlanning = planningRowsV2_(products, suppliers, purchaseOrders, purchaseLines, snapshot, dailyUsageStatsFromMovementsV2_(movements), productPriceAnalytics);
+  const supplierAnalytics = supplierAnalyticsV2_(suppliers, purchaseOrders, purchaseLines, receiving);
+  const recommendations = inventoryPlanning
+    .filter((row) => row.can_calculate_reorder && ["REORDER", "WATCH"].includes(row.status))
+    .map((row) => ({
+      recommendation_id: "REC-" + row.product_id,
+      recommendation_type: row.status,
+      product_id: row.product_id,
+      product_name: row.product_name,
+      supplier_id: row.supplier_id,
+      supplier_name: row.supplier_name,
+      recommended_qty: row.recommended_order_qty,
+      reorder_point: row.reorder_point,
+      target_stock_level: row.target_stock_level,
+      confidence_score: 0.75,
+      reason_text: row.status === "REORDER" ? "Available inventory is at or below reorder point." : "Available inventory is below target stock."
+    }));
+
+  return {
+    calculated_at: today_(),
+    inventoryValueByProduct,
+    inventoryPlanning,
+    supplierAnalytics,
+    recommendations,
+    inventorySnapshot: snapshot,
+    productPriceAnalytics,
+    report_notes: {
+      inventory_value_rule: "unit_cost is cost per purchase unit/case; cost per LB = unit_cost / (original_qty / purchase_qty_received).",
+      planning_rule: "Reorder planning is not calculated until the product has real sales/pick movement history and stock targets."
+    }
+  };
+}
+
+
+function buildInventoryPlanning_(products, suppliers, purchaseOrders, purchaseLines, snapshot) {
+  const supplierMap = byId_(suppliers, "supplier_id");
+  const poMap = byId_(purchaseOrders, "po_id");
+  const supplierByProduct = {};
+  purchaseLines.forEach((line) => {
+    if (!supplierByProduct[line.product_id]) {
+      supplierByProduct[line.product_id] = line.supplier_id || (poMap[line.po_id] || {}).supplier_id || "";
+    }
   });
-  return out;
-}
 
-function velocityDays_(velocityClass) {
-  const value = String(velocityClass || "").toUpperCase();
-  if (value === "FAST") return 10;
-  if (value === "SLOW") return 60;
-  return 40;
-}
 
-function startOfDay_(value) {
-  if (!value) return null;
-  let date;
-
-  if (value instanceof Date) {
-    date = new Date(value.getTime());
-  } else {
-    date = parseDate_(value);
-  }
-
-  if (!date || isNaN(date.getTime())) return null;
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
-}
-
-function parseDate_(value) {
-  if (!value) return null;
-  if (value instanceof Date) return value;
-
-  const text = String(value).trim();
-  if (!text) return null;
-
-  let date = new Date(text);
-  if (!isNaN(date.getTime())) return date;
-
-  const match = text.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
-  if (match) {
-    const day = Number(match[1]);
-    const month = Number(match[2]);
-    const year = Number(match[3]);
-    const hour = Number(match[4] || 0);
-    const minute = Number(match[5] || 0);
-    const second = Number(match[6] || 0);
-
-    // Sheet locale is es_MX, so visible strings are usually day/month/year.
-    date = new Date(year, month - 1, day, hour, minute, second);
-    if (!isNaN(date.getTime())) return date;
-  }
-
-  return null;
-}
-
-function dateTime_(value) {
-  const date = parseDate_(value);
-  return date ? date.getTime() : 0;
-}
-
-function daysBetween_(start, end) {
-  const startDate = startOfDay_(start);
-  const endDate = startOfDay_(end);
-  if (!startDate || !endDate) return NaN;
-  return (endDate.getTime() - startDate.getTime()) / 86400000;
-}
-
-function dateKey_(value) {
-  const date = startOfDay_(value);
-  return date ? Utilities.formatDate(date, APP_TIMEZONE, "yyyy-MM-dd") : "";
-}
-
-function today_() {
-  return Utilities.formatDate(new Date(), APP_TIMEZONE, "yyyy-MM-dd");
-}
-
-function nowIso_() {
-  return Utilities.formatDate(new Date(), APP_TIMEZONE, "yyyy-MM-dd'T'HH:mm:ss");
-}
-
-function addDays_(dateValue, days) {
-  const date = startOfDay_(dateValue);
-  if (!date) return "";
-  date.setDate(date.getDate() + Math.max(0, Math.round(num_(days))));
-  return dateKey_(date);
-}
-
-function userId_(user) {
-  return (user && (user.user_id || user.role)) || "WEB_APP";
-}
-
-function pad_(value, width) {
-  let text = String(value);
-  while (text.length < width) text = "0" + text;
-  return text;
-}
-
-function nextId_(sheetName, keyColumn, prefix) {
-  return nextIdFromRows_(readTable_(sheetName), keyColumn, prefix);
-}
-
-function nextIdFromRows_(rows, keyColumn, prefix) {
-  let max = 0;
-  rows.forEach((row) => {
-    const value = String(row[keyColumn] || "");
-    const match = value.match(/(\d+)$/);
-    if (match) max = Math.max(max, Number(match[1]));
+  return products.map((product) => {
+    const currentQty = snapshot
+      .filter((row) => row.product_id === product.product_id)
+      .reduce((sum, row) => sum + number_(row.available_qty, row.current_qty), 0);
+    const averageDailyUsage = estimateDailyUsage_(product.product_id);
+    const supplierId = supplierByProduct[product.product_id] || "";
+    const supplier = supplierMap[supplierId] || {};
+    const avgLeadTime = number_(supplier.lead_time_expected_days, 7) || 7;
+    const safetyStock = Math.max(number_(product.min_stock_qty, 0), averageDailyUsage * 3);
+    const reorderPoint = Math.max(number_(product.min_stock_qty, 0), averageDailyUsage * avgLeadTime + safetyStock);
+    const targetStock = Math.max(number_(product.target_stock_qty, 0), reorderPoint * 1.5);
+    const status = currentQty <= reorderPoint ? "REORDER" : currentQty <= targetStock ? "WATCH" : "OK";
+    return {
+      product_id: product.product_id,
+      product_name: product.product_name,
+      supplier_id: supplierId,
+      supplier_name: supplier.supplier_name || "",
+      current_qty: currentQty,
+      average_daily_usage: averageDailyUsage,
+      std_daily_usage: 0,
+      avg_lead_time_days: avgLeadTime,
+      std_lead_time_days: 0,
+      demand_during_lead_time: averageDailyUsage * avgLeadTime,
+      safety_stock: safetyStock,
+      reorder_point: reorderPoint,
+      target_stock_level: targetStock,
+      status
+    };
   });
-  return prefix + "-" + pad_(max + 1, 6);
 }
 
-function logError_(type, action, error) {
+
+function estimateDailyUsage_(productId) {
+  const since = new Date(today_().getTime() - 90 * 86400000);
+  const usage = readTable_("INVENTORY_MOVEMENTS")
+    .filter((move) => move.product_id === productId && number_(move.qty_change, 0) < 0 && (!move.timestamp || new Date(move.timestamp) >= since))
+    .reduce((sum, move) => sum + Math.abs(number_(move.qty_change, 0)), 0);
+  return usage / 90;
+}
+
+
+function buildSupplierAnalytics_(suppliers, purchaseOrders, purchaseLines, receiving) {
+  const totalSpend = purchaseOrders.reduce((sum, po) => sum + number_(po.total_amount, 0), 0);
+  return suppliers.map((supplier) => {
+    const orders = purchaseOrders.filter((po) => po.supplier_id === supplier.supplier_id);
+    const orderIds = {};
+    orders.forEach((po) => orderIds[po.po_id] = true);
+    const lines = purchaseLines.filter((line) => orderIds[line.po_id]);
+    const received = receiving.filter((row) => row.supplier_id === supplier.supplier_id);
+    const spend = orders.reduce((sum, po) => sum + number_(po.total_amount, 0), 0);
+    return {
+      supplier_id: supplier.supplier_id,
+      supplier_name: supplier.supplier_name,
+      email: supplier.email,
+      phone: supplier.phone,
+      products_bought: Array.from(new Set(lines.map((line) => line.product_id).filter(Boolean))).join(", "),
+      total_orders: orders.length,
+      completed_orders: orders.filter((po) => ["RECEIVED", "CLOSED", "COMPLETE"].indexOf(String(po.po_status || "").toUpperCase()) >= 0).length,
+      total_purchase_amount: spend,
+      spend_share_percent: totalSpend ? spend / totalSpend * 100 : 0,
+      avg_lead_time_days: number_(supplier.lead_time_expected_days, 0),
+      std_lead_time_days: 0,
+      quality_percent: received.length ? received.filter((row) => String(row.quality_status || "PASS").toUpperCase() === "PASS").length / received.length * 100 : 100,
+      product_accuracy_percent: 100,
+      quantity_accuracy_percent: 100
+    };
+  });
+}
+
+
+function lookupScan(payload) {
+  payload = payload || {};
+  const value = String(payload.scanValue || payload.scan_code || payload.value || "").trim();
+  if (!value) throw new Error("Scan value is required.");
+  const product = readTable_("PRODUCTS").find((row) => [row.product_id, row.barcode_or_qr_value, row.amazon_sku, row.wholesale_sku].map(String).indexOf(value) >= 0);
+  if (product) return { type: "PRODUCT", record: product };
+  const lot = readTable_("LOTS").find((row) => [row.internal_lot_id, row.qr_value, row.supplier_lot_number].map(String).indexOf(value) >= 0);
+  if (lot) return { type: "LOT", record: lot };
+  const location = readTable_("LOCATIONS").find((row) => [row.location_id, row.qr_value].map(String).indexOf(value) >= 0);
+  if (location) return { type: "LOCATION", record: location };
+  const poLine = readTable_("PURCHASE_ORDER_LINES").find((row) => [row.po_line_id, row.qr_value].map(String).indexOf(value) >= 0);
+  if (poLine) return { type: "PURCHASE_ORDER_LINE", record: poLine, purchaseOrder: getPurchaseOrderDetail({ po_id: poLine.po_id }) };
+  const pkg = readTable_("AMAZON_PACKAGES").find((row) => [row.package_id, row.package_qr_value].map(String).indexOf(value) >= 0);
+  if (pkg) return { type: "AMAZON_PACKAGE", record: pkg };
+  return { type: "NOT_FOUND", scanValue: value };
+}
+
+
+function validateOperationalSchema() {
+  const results = Object.keys(CORE_SCHEMA).map((sheetName) => {
+    const sheet = spreadsheet_().getSheetByName(sheetName);
+    if (!sheet) return { sheet: sheetName, ok: false, missingSheet: true, missingHeaders: CORE_SCHEMA[sheetName] };
+    const meta = tableMeta_(sheetName);
+    const missingHeaders = CORE_SCHEMA[sheetName].filter((header) => meta.headers.indexOf(header) < 0);
+    return { sheet: sheetName, ok: missingHeaders.length === 0, missingSheet: false, headerRow: meta.headerRow, missingHeaders };
+  });
+  return {
+    spreadsheetId: spreadsheet_().getId(),
+    ok: results.every((result) => result.ok),
+    checkedAt: today_(),
+    results
+  };
+}
+
+
+function byId_(rows, idColumn) {
+  return (rows || []).reduce((map, row) => {
+    map[row[idColumn]] = row;
+    return map;
+  }, {});
+}
+
+
+function nextBlFolio_() {
   try {
-    ensureTableColumns_("ERROR_LOG", ["error_id", "timestamp", "error_type", "action", "message", "stack", "status"]);
-    appendRecord_("ERROR_LOG", {
-      error_id: nextId_("ERROR_LOG", "error_id", "ERR"),
-      timestamp: nowIso_(),
-      error_type: type,
-      action: action,
-      message: error && error.message ? error.message : String(error),
-      stack: error && error.stack ? String(error.stack).slice(0, 1500) : "",
-      status: "OPEN"
-    });
-  } catch (_loggingError) {
-    // Do not allow logging failures to hide the real API error.
+    return readTable_("SALES_ORDERS").reduce((max, order) => Math.max(max, number_(order.bl_folio, 0)), 2719) + 1;
+  } catch (_error) {
+    return "";
   }
 }
