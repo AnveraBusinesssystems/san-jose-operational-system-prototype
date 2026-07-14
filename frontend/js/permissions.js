@@ -11,4 +11,3 @@ const permissions = {
     "products:view", "products:create", "products:edit",
     "suppliers:view", "suppliers:create", "suppliers:edit",
     "orders:view",
-    "purchaseOrders:view", "purchaseOrders:create", "purchase
