@@ -768,6 +768,51 @@ function nextBlFolio(salesOrders) {
   return salesOrders.reduce((max, order) => Math.max(max, Number(order.bl_folio) || 0), 2719) + 1;
 }
 
+
+export async function deliverSalesOrder(user, input) {
+  if (useAppsScript()) return callAppsScript("deliverSalesOrder", { user, input });
+  requirePermission(user, "salesOrders:actions");
+  const data = await db();
+  data.salesOrders ||= [];
+  data.salesOrderLines ||= [];
+  data.inventoryMovements ||= [];
+  const salesOrderId = String(input.sales_order_id || input.salesOrderId || "");
+  const order = data.salesOrders.find((item) => item.sales_order_id === salesOrderId);
+  if (!order) throw new Error("Sales Order was not found.");
+  if (String(order.status).toUpperCase() === "DELIVERED") throw new Error("This Sales Order is already delivered.");
+  const requested = new Map((input.lines || []).map((line) => [line.sales_order_line_id, line]));
+  const lines = data.salesOrderLines.filter((line) => line.sales_order_id === salesOrderId);
+  const plans = lines.map((line) => {
+    const selected = requested.get(line.sales_order_line_id) || {};
+    const lotId = selected.internal_lot_id || line.preferred_internal_lot_id;
+    const locationId = selected.location_id || line.preferred_location_id;
+    const lot = data.lots.find((item) => item.internal_lot_id === lotId);
+    const remaining = numberValue(line.qty_remaining, line.qty_ordered);
+    const required = numberValue(line.inventory_qty_required, line.qty_ordered) * (numberValue(line.qty_ordered) ? remaining / numberValue(line.qty_ordered) : 1);
+    if (required > 0 && (!lot || lot.product_id !== line.product_id || lot.current_location_id !== locationId)) throw new Error("Review the selected lot and warehouse space.");
+    if (required > numberValue(lot?.current_qty_script, lot?.original_qty) + 0.0001) throw new Error(`Not enough inventory in ${lotId}.`);
+    return { line, lot, lotId, locationId, required };
+  });
+  plans.forEach(({ line, lot, lotId, locationId, required }) => {
+    if (required > 0) {
+      lot.current_qty_script = Math.max(0, numberValue(lot.current_qty_script, lot.original_qty) - required);
+      data.inventoryMovements.push({ movement_id: uid("MOV", data.inventoryMovements, "movement_id"), movement_type: "SALE", timestamp: new Date().toISOString(), user_id: user.user_id || user.role, product_id: line.product_id, internal_lot_id: lotId, qty_change: -required, unit_type: line.inventory_unit_type || "LB", from_location_id: locationId, to_location_id: "OUTBOUND", related_sales_order_id: salesOrderId, notes: `Delivery confirmed for ${salesOrderId}.` });
+    }
+    line.preferred_internal_lot_id = lotId;
+    line.preferred_location_id = locationId;
+    line.qty_picked = line.qty_ordered;
+    line.qty_remaining = 0;
+    line.line_status = "DELIVERED";
+  });
+  order.status = "DELIVERED";
+  order.delivered_at = new Date().toISOString();
+  order.delivered_by = user.user_id || user.role;
+  order.delivery_notes = input.delivery_notes || "";
+  order.updated_at = new Date().toISOString();
+  save();
+  return getSalesOrderDetail(salesOrderId);
+}
+
 export async function salesOrderAction(user, salesOrderId, action) {
   if (useAppsScript()) return callAppsScript("salesOrderAction", { user, salesOrderId, action });
   requirePermission(user, "salesOrders:actions");

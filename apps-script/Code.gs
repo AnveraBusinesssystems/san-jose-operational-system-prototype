@@ -1,5 +1,5 @@
 const SPREADSHEET_ID = "1XYaMXKGR5EG8VS38PPiHFNbtmwX5Ae6N33jLE72nxKE";
-const BACKEND_VERSION = "sales-orders-v2-2026-07-10";
+const BACKEND_VERSION = "sales-orders-delivery-v1-2026-07-14";
 
 
 const ROLES = {
@@ -25,6 +25,7 @@ const PERMISSIONS = {
     "scanner:lookup"
   ],
   MANAGER: [
+    "salesOrders:actions",
     "salesOrders:send",
     "receiving:create",
     "scanner:lookup"
@@ -47,7 +48,7 @@ const CORE_SCHEMA = {
   RECEIVING: ["receiving_id", "po_id", "po_line_id", "supplier_id", "product_id", "scan_code", "internal_lot_id", "supplier_lot_number", "received_date", "received_by", "qty_received", "qty_damaged", "qty_accepted", "unit_type", "quality_score", "product_accuracy_score", "over_under_status", "recommended_location_id", "confirmed_location_id", "requires_supervisor_approval", "approval_status", "notes", "base_unit", "units_per_purchase_unit", "qty_accepted_base", "pallet_count", "quality_status"],
   LOTS: ["internal_lot_id", "product_id", "supplier_id", "supplier_lot_number", "po_id", "po_line_id", "received_date", "original_qty", "current_qty_script", "unit_type", "unit_cost", "currency", "current_location_id", "status", "expiration_date", "qr_value", "label_printed_status", "label_printed_at", "created_at", "updated_at", "notes", "purchase_qty_received", "purchase_unit_type", "pallet_count"],
   INVENTORY_MOVEMENTS: ["movement_id", "movement_type", "timestamp", "user_id", "product_id", "internal_lot_id", "package_id", "qty_change", "unit_type", "from_location_id", "to_location_id", "related_po_id", "related_receiving_id", "related_sales_order_id", "related_pick_task_id", "related_amazon_order_id", "scan_code", "device_id", "approval_status", "notes"],
-  SALES_ORDERS: ["sales_order_id", "channel", "order_source", "customer_name", "customer_email", "customer_phone", "amazon_order_id", "order_date", "ship_by_date", "status", "currency", "subtotal_amount", "tax_amount", "shipping_amount", "total_amount", "invoice_status", "quickbooks_invoice_id", "created_by", "created_at", "updated_at", "notes", "customer_id", "ship_method", "payment_terms", "tax_enabled", "tax_rate", "estimated_gross_profit", "estimated_gross_margin_percent", "confirmed_at", "picked_at", "shipped_at", "bl_folio", "shipping_address"],
+  SALES_ORDERS: ["sales_order_id", "channel", "order_source", "customer_name", "customer_email", "customer_phone", "amazon_order_id", "order_date", "ship_by_date", "status", "currency", "subtotal_amount", "tax_amount", "shipping_amount", "total_amount", "invoice_status", "quickbooks_invoice_id", "created_by", "created_at", "updated_at", "notes", "customer_id", "ship_method", "payment_terms", "tax_enabled", "tax_rate", "estimated_gross_profit", "estimated_gross_margin_percent", "confirmed_at", "picked_at", "shipped_at", "delivered_at", "delivered_by", "delivery_notes", "bl_folio", "shipping_address"],
   SALES_ORDER_LINES: ["sales_order_line_id", "sales_order_id", "channel", "amazon_order_item_id", "product_id", "amazon_sku", "wholesale_sku", "qty_ordered", "qty_picked", "qty_remaining", "unit_type", "unit_price", "currency", "line_total", "preferred_internal_lot_id", "preferred_location_id", "line_status", "notes", "unit_weight_lbs", "inventory_qty_required", "inventory_unit_type", "unit_cost", "estimated_gross_profit", "expiration_date", "fefo_status"],
   PICK_TASKS: ["pick_task_id", "sales_order_id", "sales_order_line_id", "channel", "task_date", "priority", "product_id", "recommended_internal_lot_id", "recommended_location_id", "qty_to_pick", "qty_picked", "unit_type", "assigned_to", "pick_status", "picked_at", "scan_code", "device_id", "exception_code", "notes", "qty_to_pick_base", "reservation_status"],
   AMAZON_PACKAGES: ["package_id", "package_qr_value", "amazon_sku", "product_id", "source_internal_lot_id", "qty_product_used", "unit_type", "packed_by", "packed_at", "package_status", "current_location_id", "matched_amazon_order_id", "matched_amazon_order_item_id", "shipped_at", "notes"],
@@ -96,6 +97,7 @@ function handleApiRequest_(action, payloadText, callback) {
       getSalesOrderDetail,
       createSalesOrder,
       salesOrderAction,
+      deliverSalesOrder,
       receiveProduct,
       sendProduct,
       recordInventoryMovement,
@@ -934,6 +936,9 @@ function createSalesOrder(payload) {
       confirmed_at: "",
       picked_at: "",
       shipped_at: "",
+      delivered_at: "",
+      delivered_by: "",
+      delivery_notes: "",
       bl_folio: input.bl_folio || nextBlFolio_(),
       shipping_address: input.shipping_address || customer.address || ""
     };
@@ -950,7 +955,7 @@ function createSalesOrder(payload) {
 function salesOrderAction(payload) {
   payload = payload || {};
   const user = payload.user || {};
-  if (normalizeRole_(user.role) !== "ADMIN") throw new Error("Only an Admin can change Sales Order status.");
+  if (!["ADMIN", "MANAGER"].includes(normalizeRole_(user.role))) throw new Error("Only an Admin or Manager can change Sales Order status.");
   const salesOrderId = String(payload.salesOrderId || payload.sales_order_id || "");
   const action = String(payload.action || payload.status || "").toUpperCase();
   if (!salesOrderId || !action) throw new Error("Choose a Sales Order action.");
@@ -976,6 +981,107 @@ function salesOrderAction(payload) {
       return cancelSalesOrder_(salesOrderId, user);
     }
     throw new Error("Unsupported Sales Order action.");
+  });
+}
+
+
+function deliverSalesOrder(payload) {
+  payload = payload || {};
+  const user = payload.user || {};
+  if (!["ADMIN", "MANAGER"].includes(normalizeRole_(user.role))) {
+    throw new Error("Only an Admin or Manager can confirm delivery.");
+  }
+  const input = payload.input || payload;
+  const salesOrderId = String(input.sales_order_id || input.salesOrderId || "").trim();
+  const requestedLines = Array.isArray(input.lines) ? input.lines : [];
+  if (!salesOrderId) throw new Error("Choose a Sales Order.");
+
+  return withScriptLock_(function () {
+    ensureTableColumns_("SALES_ORDERS", CORE_SCHEMA.SALES_ORDERS);
+    const detail = getSalesOrderDetail({ sales_order_id: salesOrderId });
+    if (!detail) throw new Error("Sales Order was not found.");
+    const current = String(detail.order.status || "DRAFT").toUpperCase();
+    if (current === "DELIVERED") throw new Error("This Sales Order is already delivered.");
+    if (current === "CANCELLED") throw new Error("A cancelled Sales Order cannot be delivered.");
+    if (!["CONFIRMED", "PARTIALLY_PICKED", "PICKED", "SHIPPED"].includes(current)) {
+      throw new Error("Confirm the Sales Order before marking it delivered.");
+    }
+
+    const requestedById = requestedLines.reduce((map, line) => {
+      map[String(line.sales_order_line_id || "")] = line;
+      return map;
+    }, {});
+    const lots = byId_(readTable_("LOTS"), "internal_lot_id");
+    const planned = [];
+    const requiredByLot = {};
+
+    detail.lines.forEach((line, index) => {
+      const remainingBase = remainingBaseQtyV2_(line);
+      if (remainingBase <= 0.0001) return;
+      const requested = requestedById[String(line.sales_order_line_id)] || {};
+      const lotId = String(requested.internal_lot_id || line.preferred_internal_lot_id || "");
+      const locationId = String(requested.location_id || line.preferred_location_id || "");
+      const lot = lots[lotId];
+      if (!lot) throw new Error(`Line ${index + 1}: selected lot was not found.`);
+      if (String(lot.product_id) !== String(line.product_id)) throw new Error(`Line ${index + 1}: selected lot belongs to another product.`);
+      if (!['ACTIVE', 'AVAILABLE'].includes(String(lot.status || 'ACTIVE').toUpperCase())) throw new Error(`Line ${index + 1}: selected lot is not active.`);
+      if (String(lot.current_location_id || "") !== locationId) throw new Error(`Line ${index + 1}: selected lot is not stored in ${locationId}.`);
+      const key = lotId;
+      requiredByLot[key] = number_(requiredByLot[key], 0) + remainingBase;
+      planned.push({ line, lot, lotId, locationId, remainingBase });
+    });
+
+    Object.keys(requiredByLot).forEach((lotId) => {
+      const lot = lots[lotId];
+      const currentQty = number_(lot.current_qty_script !== "" && lot.current_qty_script !== undefined ? lot.current_qty_script : lot.original_qty, 0);
+      if (requiredByLot[lotId] > currentQty + 0.0001) {
+        throw new Error(`Not enough inventory in lot ${lotId}. Available ${currentQty}; required ${requiredByLot[lotId]}.`);
+      }
+    });
+
+    planned.forEach((item) => {
+      updateTableRecord_("SALES_ORDER_LINES", "sales_order_line_id", item.line.sales_order_line_id, {
+        preferred_internal_lot_id: item.lotId,
+        preferred_location_id: item.locationId,
+        fefo_status: item.lotId === String(item.line.preferred_internal_lot_id) && item.locationId === String(item.line.preferred_location_id) ? item.line.fefo_status || "RECOMMENDED" : "OVERRIDE"
+      });
+      const task = detail.pickTasks.find((row) => String(row.sales_order_line_id) === String(item.line.sales_order_line_id));
+      if (task) {
+        updateTableRecord_("PICK_TASKS", "pick_task_id", task.pick_task_id, {
+          recommended_internal_lot_id: item.lotId,
+          recommended_location_id: item.locationId
+        });
+      }
+      recordInventoryMovementInternal_(user, {
+        movement_type: "SALE",
+        internal_lot_id: item.lotId,
+        qty: item.remainingBase,
+        unit_type: item.line.inventory_unit_type || item.lot.unit_type || "LB",
+        location_id: item.locationId,
+        related_sales_order_id: salesOrderId,
+        related_pick_task_id: task ? task.pick_task_id : "",
+        sales_order_line_id: item.line.sales_order_line_id,
+        notes: `Delivery confirmed for ${salesOrderId}.`
+      });
+    });
+
+    detail.lines.forEach((line) => updateTableRecord_("SALES_ORDER_LINES", "sales_order_line_id", line.sales_order_line_id, {
+      line_status: "DELIVERED",
+      qty_remaining: 0
+    }));
+    detail.pickTasks.forEach((task) => updateTableRecord_("PICK_TASKS", "pick_task_id", task.pick_task_id, {
+      pick_status: "DELIVERED",
+      reservation_status: "RELEASED"
+    }));
+    updateTableRecord_("SALES_ORDERS", "sales_order_id", salesOrderId, {
+      status: "DELIVERED",
+      delivered_at: today_(),
+      delivered_by: user.user_id || user.role,
+      delivery_notes: String(input.delivery_notes || ""),
+      updated_at: today_()
+    });
+    writeAuditLog_({ user_id: user.user_id, role: user.role, action_type: "DELIVER_SALES_ORDER", table_name: "SALES_ORDERS", record_id: salesOrderId, notes: String(input.delivery_notes || "") });
+    return getSalesOrderDetail({ sales_order_id: salesOrderId });
   });
 }
 
