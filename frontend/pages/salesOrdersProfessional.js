@@ -1,7 +1,5 @@
-import { render as renderLegacySalesOrders } from "./salesOrders.js?v=login-repair1";
-import { navigate } from "../js/router.js?v=login-repair1";
-
-const SENDABLE_STATUSES = new Set(["CONFIRMED", "PARTIALLY_PICKED", "PARTIAL"]);
+import { render as renderLegacySalesOrders } from "./salesOrders.js?v=delivery1";
+import { deliveryButton, installDeliveryActions, isDeliverableStatus, replaceAdminDeliveryActions } from "../js/salesDelivery.js?v=delivery1";
 
 export async function render(ctx) {
   await renderLegacySalesOrders(ctx);
@@ -10,6 +8,8 @@ export async function render(ctx) {
   ctx.view.classList.add("sales-orders-professional");
 
   if (role === "ADMIN") {
+    replaceAdminDeliveryActions(ctx.view);
+    installDeliveryActions(ctx, () => render(ctx));
     ctx.setTitle(
       "Sales Orders",
       "Customer orders, fulfillment progress, and commercial analysis"
@@ -19,30 +19,30 @@ export async function render(ctx) {
 
   ctx.setTitle(
     "Sales Orders",
-    "Open customer orders ready for warehouse fulfillment"
+    role === "MANAGER"
+      ? "Review open customer orders and confirm delivery"
+      : "Open customer orders and fulfillment status"
   );
 
   removeOrderBuilder(ctx.view);
-  simplifyWarehouseTable(ctx.view);
+  simplifyCustomerOrders(ctx.view, role);
+  installDeliveryActions(ctx, () => render(ctx));
 }
 
 function removeOrderBuilder(root) {
   root.querySelector(".sales-order-builder")?.remove();
 }
 
-function simplifyWarehouseTable(root) {
+function simplifyCustomerOrders(root, role) {
   const table = root.querySelector("table");
   if (!table) return;
 
   removeColumn(table, "Total");
-  replaceActionColumn(table);
+  replaceActionColumn(table, role);
 
   Array.from(table.tBodies[0]?.rows || []).forEach((row) => {
-    const status = String(
-      row.querySelector('[data-label="Status"]')?.textContent || ""
-    ).trim().toUpperCase();
-
-    if (!SENDABLE_STATUSES.has(status)) {
+    const status = rowStatus(row);
+    if (!["CONFIRMED", "PARTIALLY_PICKED", "PARTIAL", "PICKED", "SHIPPED", "DELIVERED"].includes(status)) {
       row.hidden = true;
     }
   });
@@ -61,7 +61,7 @@ function removeColumn(table, label) {
   });
 }
 
-function replaceActionColumn(table) {
+function replaceActionColumn(table, role) {
   const headers = Array.from(table.tHead?.rows[0]?.cells || []);
   const index = headers.findIndex(
     (cell) => String(cell.textContent || "").trim().toUpperCase() === "ACTIONS"
@@ -73,21 +73,23 @@ function replaceActionColumn(table) {
     const orderId = String(
       row.querySelector('[data-label="SO"]')?.textContent || row.cells[0]?.textContent || ""
     ).trim();
-    const status = String(
-      row.querySelector('[data-label="Status"]')?.textContent || ""
-    ).trim().toUpperCase();
+    const status = rowStatus(row);
 
     if (!cell) return;
-    cell.innerHTML = SENDABLE_STATUSES.has(status)
-      ? `<button class="btn" type="button" data-send-sales-order="${escapeAttribute(orderId)}">Send Product</button>`
-      : '<span class="muted">Not ready</span>';
+    if (status === "DELIVERED") {
+      cell.innerHTML = '<span class="status">Delivered ✓</span>';
+    } else if (role === "MANAGER" && isDeliverableStatus(status)) {
+      cell.innerHTML = deliveryButton(orderId);
+    } else {
+      cell.innerHTML = '<span class="muted">Admin or Manager confirms delivery</span>';
+    }
   });
+}
 
-  table.addEventListener("click", (event) => {
-    const button = event.target.closest("[data-send-sales-order]");
-    if (!button) return;
-    navigate(`sendProduct:${button.dataset.sendSalesOrder}`);
-  });
+function rowStatus(row) {
+  return String(
+    row.querySelector('[data-label="Status"]')?.textContent || ""
+  ).trim().toUpperCase();
 }
 
 function normalizeRole(role) {
@@ -97,12 +99,4 @@ function normalizeRole(role) {
     return "OPERATOR";
   }
   return normalized;
-}
-
-function escapeAttribute(value) {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;");
 }
