@@ -87,6 +87,10 @@ export async function createSalesOrder(user, input) {
   return mutate(() => base.createSalesOrder(user, input));
 }
 
+export async function deliverSalesOrder(user, input) {
+  return mutate(() => base.deliverSalesOrder(user, input));
+}
+
 export async function salesOrderAction(user, salesOrderId, action) {
   return mutate(() => base.salesOrderAction(user, salesOrderId, action));
 }

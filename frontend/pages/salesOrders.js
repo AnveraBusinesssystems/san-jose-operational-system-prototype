@@ -1,5 +1,6 @@
 import {
   createSalesOrder,
+  deliverSalesOrder,
   getSalesOrderDetail,
   inventorySnapshot,
   listSalesOrders,
@@ -46,7 +47,7 @@ export async function render(ctx) {
   `;
 
   setupSalesOrderBuilder(ctx, customers, inventoryChoices, productChoices);
-  setupSalesOrderActions(ctx);
+  setupSalesOrderActions(ctx, inventoryRows);
 }
 
 function salesOrderForm(customers, productChoices) {
@@ -468,10 +469,14 @@ function compareFefoChoices(a, b) {
     || a.locationId.localeCompare(b.locationId);
 }
 
-function setupSalesOrderActions(ctx) {
+function setupSalesOrderActions(ctx, inventoryRows) {
   document.querySelectorAll("[data-sales-action]").forEach((button) => {
     button.addEventListener("click", async () => {
       const { salesOrderId, salesAction } = button.dataset;
+      if (salesAction === "DELIVER") {
+        await openDeliveryReview(ctx, salesOrderId, inventoryRows);
+        return;
+      }
       if (["blSjp", "pickList"].includes(salesAction)) {
         const documentWindow = window.open("", "_blank");
         if (!documentWindow) return notice("Pop-up blocked. Allow pop-ups to open Sales Order documents.");
@@ -507,14 +512,77 @@ function actionButtons(ctx, order) {
       <button class="btn secondary" data-sales-action="blSjp" data-sales-order-id="${escapeHtml(order.sales_order_id)}" type="button">BL SJP</button>
       <button class="btn secondary" data-sales-action="pickList" data-sales-order-id="${escapeHtml(order.sales_order_id)}" type="button">Pick List</button>
       ${!operator && orderStatus === "DRAFT" ? actionButton(order, "CONFIRM", "Mark Confirmed") : ""}
-      ${orderStatus === "CONFIRMED" ? actionButton(order, "PICKED", "Mark Picked") : ""}
-      ${!operator && orderStatus === "PICKED" ? actionButton(order, "SHIPPED", "Mark Shipped") : ""}
+      ${!operator && ["CONFIRMED", "PARTIALLY_PICKED", "PICKED", "SHIPPED"].includes(orderStatus) ? actionButton(order, "DELIVER", "Mark Delivered") : ""}
+      ${orderStatus === "DELIVERED" ? `<span class="status">Delivered ✓</span>` : ""}
     </div>
   `;
 }
 
 function actionButton(order, action, label) {
   return `<button class="btn" data-sales-action="${action}" data-sales-order-id="${escapeHtml(order.sales_order_id)}" type="button">${label}</button>`;
+}
+
+
+async function openDeliveryReview(ctx, salesOrderId, inventoryRows) {
+  try {
+    const detail = await getSalesOrderDetail(salesOrderId);
+    if (!detail) throw new Error("Sales Order was not found.");
+    const physicalChoices = inventoryRows.filter((row) => Number(row.current_qty ?? row.qty ?? 0) > 0);
+    const overlay = document.createElement("div");
+    overlay.className = "delivery-review-overlay";
+    overlay.innerHTML = `
+      <style>
+        .delivery-review-overlay{position:fixed;inset:0;z-index:1000;background:rgba(15,24,19,.62);display:grid;place-items:center;padding:18px}.delivery-review-dialog{width:min(760px,100%);max-height:90vh;overflow:auto;background:#fff;border-radius:14px;box-shadow:0 24px 70px rgba(0,0,0,.3);padding:22px}.delivery-review-head{display:flex;justify-content:space-between;gap:16px;align-items:start}.delivery-review-head h2{margin:0}.delivery-review-copy{margin:8px 0 18px}.delivery-review-line{display:grid;grid-template-columns:minmax(160px,1fr) minmax(240px,1.5fr);gap:12px;padding:14px 0;border-top:1px solid #dce5df}.delivery-review-product strong,.delivery-review-product small{display:block}.delivery-review-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:18px}.delivery-review-close{border:0;background:transparent;font-size:26px;cursor:pointer}@media(max-width:640px){.delivery-review-dialog{padding:17px}.delivery-review-line{grid-template-columns:1fr}.delivery-review-actions .btn{flex:1}}
+      </style>
+      <section class="delivery-review-dialog" role="dialog" aria-modal="true" aria-labelledby="deliveryReviewTitle">
+        <div class="delivery-review-head"><div><h2 id="deliveryReviewTitle">Confirm Delivery — ${escapeHtml(salesOrderId)}</h2><p class="muted delivery-review-copy">Review the products, lots, and warehouse spaces. Change a selection only when it is incorrect, then confirm once.</p></div><button class="delivery-review-close" type="button" aria-label="Close">&times;</button></div>
+        <form id="deliveryReviewForm">
+          <div>${detail.lines.map((line, index) => deliveryReviewLine(line, index, physicalChoices)).join("")}</div>
+          <div class="field"><label>Delivery Notes</label><textarea name="delivery_notes" placeholder="Optional"></textarea></div>
+          <div class="delivery-review-actions"><button class="btn secondary" data-close-delivery type="button">Cancel</button><button class="btn" type="submit">Confirm Delivered</button></div>
+        </form>
+      </section>`;
+    document.body.appendChild(overlay);
+    const close = () => overlay.remove();
+    overlay.querySelector(".delivery-review-close").addEventListener("click", close);
+    overlay.querySelector("[data-close-delivery]").addEventListener("click", close);
+    overlay.addEventListener("click", (event) => { if (event.target === overlay) close(); });
+    overlay.querySelector("#deliveryReviewForm").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const button = event.submitter;
+      button.disabled = true;
+      button.textContent = "Confirming...";
+      try {
+        const lines = [...overlay.querySelectorAll("[data-delivery-line]")].map((row) => {
+          const selected = row.querySelector("select").selectedOptions[0];
+          return { sales_order_line_id: row.dataset.deliveryLine, internal_lot_id: selected.dataset.lotId, location_id: selected.dataset.locationId };
+        });
+        await deliverSalesOrder(ctx.user, { sales_order_id: salesOrderId, delivery_notes: event.currentTarget.elements.delivery_notes.value.trim(), lines });
+        close();
+        notice(`${salesOrderId} marked delivered and inventory updated.`);
+        await render(ctx);
+      } catch (error) {
+        notice(error.message);
+        button.disabled = false;
+        button.textContent = "Confirm Delivered";
+      }
+    });
+  } catch (error) {
+    notice(error.message);
+  }
+}
+
+function deliveryReviewLine(line, index, rows) {
+  const remaining = Number(line.qty_remaining ?? line.qty_ordered ?? 0);
+  const candidates = rows.filter((row) => String(row.product_id) === String(line.product_id));
+  const options = candidates.map((row) => {
+    const lotId = String(row.internal_lot_id || row.lot?.internal_lot_id || "");
+    const locationId = String(row.location_id || row.lot?.current_location_id || "");
+    const selected = lotId === String(line.preferred_internal_lot_id || "") && locationId === String(line.preferred_location_id || "");
+    const available = Number(row.current_qty ?? row.qty ?? 0);
+    return `<option value="${escapeHtml(`${lotId}|${locationId}`)}" data-lot-id="${escapeHtml(lotId)}" data-location-id="${escapeHtml(locationId)}" ${selected ? "selected" : ""}>${escapeHtml(lotId)} · ${escapeHtml(locationId)} · ${escapeHtml(formatNumber(available))} ${escapeHtml(row.unit_type || "LB")} physically available</option>`;
+  }).join("");
+  return `<div class="delivery-review-line" data-delivery-line="${escapeHtml(line.sales_order_line_id)}"><div class="delivery-review-product"><strong>${escapeHtml(line.product?.product_name || line.product_id)}</strong><small>${escapeHtml(formatNumber(line.qty_ordered))} ${escapeHtml(line.unit_type)} · ${escapeHtml(formatNumber(line.inventory_qty_required || 0))} ${escapeHtml(line.inventory_unit_type || "LB")}</small><small>${remaining <= 0.0001 ? "Inventory already deducted; confirmation will not deduct again." : "Inventory will be deducted when confirmed."}</small></div><div class="field"><label>Lot / Warehouse Space</label><select required>${options || `<option value="">No active inventory found</option>`}</select></div></div>`;
 }
 
 export function printableBillOfLading(detail) {
