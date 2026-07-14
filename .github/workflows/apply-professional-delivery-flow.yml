@@ -1,0 +1,29 @@
+name: Apply Professional Sales Delivery Flow
+
+on:
+  push:
+    branches:
+      - codex/professional-ui-refresh
+
+permissions:
+  contents: write
+
+jobs:
+  apply-delivery-flow:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out professional branch
+        uses: actions/checkout@v4
+        with:
+          ref: codex/professional-ui-refresh
+          fetch-depth: 0
+
+      - name: Apply focused delivery changes
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          import re
+
+          def read(path):
+              return Path(path
