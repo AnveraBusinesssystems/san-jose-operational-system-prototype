@@ -1,6 +1,6 @@
 import { clearApiCache, getSalesOrderDetail, inventorySnapshot } from "./api-smooth1.js?v=delivery1";
 import { GOOGLE_SCRIPT_WEB_APP_URL } from "./config.js?v=opening1";
-import { escapeHtml, formatQuantity, notice } from "./utils.js?v=filters1";
+import { escapeHtml, formatQuantity, notice, status } from "./utils.js?v=filters1";
 
 const OPEN_STATUSES = new Set(["CONFIRMED", "PARTIALLY_PICKED", "PARTIAL", "PICKED", "SHIPPED"]);
 
@@ -20,15 +20,15 @@ export function installDeliveryActions(ctx, onComplete) {
 
 export function replaceAdminDeliveryActions(root) {
   root.querySelectorAll("tbody tr").forEach((row) => {
-    const status = text(row.querySelector('[data-label="Status"]'));
+    const rowStatus = text(row.querySelector('[data-label="Status"]'));
     const orderId = text(row.querySelector('[data-label="SO"]')) || text(row.cells[0]);
     const actions = row.querySelector('[data-label="Actions"]') || row.cells[row.cells.length - 1];
     if (!actions || !orderId) return;
     actions.querySelectorAll('[data-sales-action="SHIPPED"], [data-sales-action="PICKED"]').forEach((button) => button.remove());
-    if (isDeliverableStatus(status) && !actions.querySelector("[data-mark-delivered]")) {
+    if (isDeliverableStatus(rowStatus) && !actions.querySelector("[data-mark-delivered]")) {
       actions.insertAdjacentHTML("beforeend", deliveryButton(orderId));
     }
-    if (String(status).toUpperCase() === "DELIVERED") actions.innerHTML = '<span class="status">Delivered ✓</span>';
+    if (String(rowStatus).toUpperCase() === "DELIVERED") actions.innerHTML = '<span class="status ok">Delivered ✓</span>';
   });
 }
 
@@ -67,11 +67,21 @@ async function openDeliveryReview(ctx, salesOrderId, onComplete) {
           const option = select.selectedOptions[0];
           return { sales_order_line_id: row.dataset.deliveryLine, internal_lot_id: option.dataset.lotId, location_id: option.dataset.locationId };
         }).filter(Boolean);
-        await callDelivery(ctx.user, { sales_order_id: salesOrderId, delivery_notes: event.currentTarget.elements.delivery_notes.value.trim(), lines });
+        const delivered = await callDelivery(ctx.user, {
+          sales_order_id: salesOrderId,
+          delivery_notes: event.currentTarget.elements.delivery_notes.value.trim(),
+          lines
+        });
+        const deliveredStatus = String(delivered?.order?.status || delivered?.status || "").trim().toUpperCase();
+        if (deliveredStatus !== "DELIVERED") {
+          throw new Error("The inventory was processed, but the Sales Order was not returned as DELIVERED. Refresh and review the order.");
+        }
+
         clearApiCache();
         close();
-        notice(`${salesOrderId} marked delivered. Remaining customer-order inventory was deducted.`);
         await onComplete?.();
+        markOrderDeliveredInView(ctx.view, salesOrderId);
+        notice(`${salesOrderId} is now DELIVERED. Remaining customer-order inventory was deducted.`);
       } catch (error) {
         notice(error.message);
         submit.disabled = false;
@@ -81,6 +91,22 @@ async function openDeliveryReview(ctx, salesOrderId, onComplete) {
   } catch (error) {
     notice(error.message);
   }
+}
+
+function markOrderDeliveredInView(root, salesOrderId) {
+  root.querySelectorAll("tbody tr").forEach((row) => {
+    const orderId = text(row.querySelector('[data-label="SO"]')) || text(row.cells[0]);
+    if (String(orderId) !== String(salesOrderId)) return;
+
+    const statusCell = row.querySelector('[data-label="Status"]');
+    const actionsCell = row.querySelector('[data-label="Actions"]') || row.cells[row.cells.length - 1];
+
+    if (statusCell) {
+      statusCell.innerHTML = status("DELIVERED");
+      statusCell.dataset.sortValue = "DELIVERED";
+    }
+    if (actionsCell) actionsCell.innerHTML = '<span class="status ok">Delivered ✓</span>';
+  });
 }
 
 function lineReview(line, index, inventoryRows) {
