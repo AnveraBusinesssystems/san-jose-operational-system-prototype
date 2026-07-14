@@ -10,6 +10,7 @@ permissions:
 
 jobs:
   apply-delivery-flow:
+    if: "!contains(github.event.head_commit.message, '[delivery-flow-applied]')"
     runs-on: ubuntu-latest
     steps:
       - name: Check out delivery branch
@@ -18,4 +19,27 @@ jobs:
           ref: agent/sales-order-delivery-confirmation
           fetch-depth: 0
 
-      -
+      - name: Apply targeted delivery changes
+        run: python scripts/apply_sales_delivery.py
+
+      - name: Validate JavaScript syntax
+        run: |
+          node --check frontend/js/api.js
+          node --check frontend/js/api-smooth1.js
+          node --check frontend/pages/salesOrders.js
+
+      - name: Validate required backend anchors
+        run: |
+          grep -q "function deliverSalesOrder" apps-script/Code.gs
+          grep -q "deliverSalesOrder," apps-script/Code.gs
+          grep -q 'status: "DELIVERED"' apps-script/Code.gs
+          grep -q "function openDeliveryReview" frontend/pages/salesOrders.js
+
+      - name: Commit implementation
+        run: |
+          rm -f scripts/apply_sales_delivery.py .github/workflows/apply-sales-delivery.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps-script/Code.gs frontend/js/api.js frontend/js/api-smooth1.js frontend/pages/salesOrders.js scripts/apply_sales_delivery.py .github/workflows/apply-sales-delivery.yml
+          git commit -m "Add Sales Order delivery confirmation [delivery-flow-applied]"
+          git push origin HEAD:agent/sales-order-delivery-confirmation
