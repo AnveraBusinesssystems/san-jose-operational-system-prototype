@@ -1,0 +1,21 @@
+name: Apply Sales Delivery Flow
+
+on:
+  push:
+    branches:
+      - agent/sales-order-delivery-confirmation
+
+permissions:
+  contents: write
+
+jobs:
+  apply-delivery-flow:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out delivery branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/sales-order-delivery-confirmation
+          fetch-depth: 0
+
+      -
