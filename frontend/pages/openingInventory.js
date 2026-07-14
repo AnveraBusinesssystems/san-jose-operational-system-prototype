@@ -143,17 +143,36 @@ export async function render(ctx) {
     const button = form.querySelector("button[type='submit']");
     const originalLabel = button.textContent;
     button.disabled = true;
-    button.textContent = `Adding ${locationIds.length} space${locationIds.length === 1 ? "" : "s"}...`;
+
+    const baseInput = Object.fromEntries(new FormData(form).entries());
+    delete baseInput.location_ids;
+    let productId = baseInput.product_id || "";
+    const results = [];
 
     try {
-      const input = Object.fromEntries(new FormData(form).entries());
-      input.location_ids = locationIds;
-      const result = await createOpeningInventory(ctx.user, input);
-      const count = result.lots?.length || 1;
-      notice(`${result.product.product_name} added to ${count} space${count === 1 ? "" : "s"}.`);
+      for (let index = 0; index < locationIds.length; index += 1) {
+        const locationId = locationIds[index];
+        button.textContent = `Adding space ${index + 1} of ${locationIds.length}...`;
+        const result = await createOpeningInventory(ctx.user, {
+          ...baseInput,
+          product_id: productId,
+          location_id: locationId
+        });
+        productId = result.product?.product_id || productId;
+        results.push(result);
+      }
+
+      const productName = results[0]?.product?.product_name || baseInput.product_name;
+      notice(`${productName} added to all ${results.length} selected space${results.length === 1 ? "" : "s"}.`);
       await render(ctx);
     } catch (error) {
-      notice(error.message);
+      const nextLocation = locationIds[results.length] || "the next space";
+      if (results.length) {
+        notice(`Added ${results.length} of ${locationIds.length} spaces. Stopped at ${nextLocation}: ${error.message}`);
+        await render(ctx);
+      } else {
+        notice(error.message);
+      }
     } finally {
       button.disabled = false;
       button.textContent = originalLabel;
