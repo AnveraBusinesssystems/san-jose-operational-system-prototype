@@ -43,6 +43,11 @@ function installSalesButtons(view, user) {
     const orderId = text(row.querySelector('[data-label="SO"]')) || text(row.cells?.[0]);
     const status = text(row.querySelector('[data-label="Status"]')).toUpperCase();
     const actions = row.querySelector('[data-label="Actions"]') || row.cells?.[row.cells.length - 1];
+
+    if (status === "CANCELLED") {
+      row.hidden = true;
+      return;
+    }
     if (!orderId || !actions || !SALES_REMOVABLE.has(status) || actions.querySelector("[data-remove-sales-order]")) return;
 
     actions.insertAdjacentHTML(
@@ -63,6 +68,11 @@ function installPurchaseButtons(view, user) {
     const poId = text(row.querySelector('[data-label="PO"]')) || text(row.cells?.[0]);
     const status = text(row.querySelector('[data-label="Status"]')).toUpperCase();
     const actions = row.querySelector('[data-label="Actions"]') || row.cells?.[row.cells.length - 1];
+
+    if (status === "CANCELLED") {
+      row.hidden = true;
+      return;
+    }
     if (!poId || !actions || !PURCHASE_REMOVABLE.has(status) || actions.querySelector("[data-remove-purchase-order]")) return;
 
     actions.insertAdjacentHTML(
