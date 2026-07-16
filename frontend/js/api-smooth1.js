@@ -1,8 +1,11 @@
 import * as base from "./api.js?v=pin1";
+import { GOOGLE_SCRIPT_WEB_APP_URL } from "./config.js?v=opening1";
 
 const READ_CACHE_TTL_MS = 45000;
 const readCache = new Map();
 const pendingReads = new Map();
+const USES_APPS_SCRIPT = Boolean(GOOGLE_SCRIPT_WEB_APP_URL && GOOGLE_SCRIPT_WEB_APP_URL.includes("/exec"));
+const LEGACY_SENT_STATUSES = new Set(["MARKSENT", "MARK_SENT"]);
 
 export const purchaseOrderQrValue = base.purchaseOrderQrValue;
 export const resetToSpreadsheetSeed = base.resetToSpreadsheetSeed;
@@ -33,7 +36,8 @@ export const listLots = () => cachedRead("listLots", [], base.listLots);
 export const listUsers = () => cachedRead("listUsers", [], base.listUsers);
 export const listSuppliers = () => cachedRead("listSuppliers", [], base.listSuppliers);
 export const listLocations = () => cachedRead("listLocations", [], base.listLocations);
-export const listPurchaseOrders = () => cachedRead("listPurchaseOrders", [], base.listPurchaseOrders);
+export const listPurchaseOrders = async () => (await cachedRead("listPurchaseOrders", [], base.listPurchaseOrders))
+  .map(normalizePurchaseOrderStatus);
 export const listSalesOrders = () => cachedRead("listSalesOrders", [], base.listSalesOrders);
 export const inventorySnapshot = () => cachedRead("inventorySnapshot", [], base.inventorySnapshot);
 export const getOperationalReports = () => cachedRead("getOperationalReports", [], base.getOperationalReports);
@@ -67,7 +71,8 @@ export async function createPurchaseOrder(user, input) {
 }
 
 export async function purchaseOrderAction(user, poId, action) {
-  return mutate(() => base.purchaseOrderAction(user, poId, action));
+  const backendAction = normalizePurchaseOrderAction(action);
+  return mutate(() => base.purchaseOrderAction(user, poId, backendAction));
 }
 
 export async function createSalesOrder(user, input) {
@@ -126,4 +131,16 @@ async function mutate(load) {
   const result = await load();
   clearApiCache();
   return result;
+}
+
+function normalizePurchaseOrderAction(action) {
+  const token = String(action || "").trim().toUpperCase().replace(/[^A-Z]/g, "");
+  if (USES_APPS_SCRIPT && token === "MARKSENT") return "SENT";
+  return action;
+}
+
+function normalizePurchaseOrderStatus(purchaseOrder) {
+  const status = String(purchaseOrder?.po_status || "").trim().toUpperCase();
+  if (!LEGACY_SENT_STATUSES.has(status)) return purchaseOrder;
+  return { ...purchaseOrder, po_status: "SENT", legacy_po_status: status };
 }
