@@ -37,10 +37,12 @@ function installGroupedLotPricing(root) {
 
   ensureGroupedLotStyles();
   let applying = false;
+  let observer = null;
 
   const regroup = () => {
     if (applying) return;
     applying = true;
+    observer?.disconnect();
     try {
       const cards = Array.from(container.querySelectorAll(".sales-line-item"));
       cards.forEach((card) => {
@@ -102,6 +104,7 @@ function installGroupedLotPricing(root) {
       });
     } finally {
       applying = false;
+      observer?.observe(container, { childList: true, subtree: true });
     }
   };
 
@@ -128,7 +131,7 @@ function installGroupedLotPricing(root) {
   form.addEventListener("change", () => queueMicrotask(regroup));
   form.addEventListener("click", () => window.setTimeout(regroup, 0));
 
-  const observer = new MutationObserver(() => window.setTimeout(regroup, 0));
+  observer = new MutationObserver(() => window.setTimeout(regroup, 0));
   observer.observe(container, { childList: true, subtree: true });
 
   regroup();
