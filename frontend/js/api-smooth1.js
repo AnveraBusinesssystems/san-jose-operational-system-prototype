@@ -1,4 +1,5 @@
 import * as base from "./api.js?v=pin1";
+import { createSalesOrderReliable } from "./sales-order-api.js?v=1";
 import { GOOGLE_SCRIPT_WEB_APP_URL } from "./config.js?v=opening1";
 
 const READ_CACHE_TTL_MS = 45000;
@@ -76,7 +77,7 @@ export async function purchaseOrderAction(user, poId, action) {
 }
 
 export async function createSalesOrder(user, input) {
-  return mutate(() => base.createSalesOrder(user, input));
+  return mutate(() => createSalesOrderReliable(user, input));
 }
 
 export async function salesOrderAction(user, salesOrderId, action) {
