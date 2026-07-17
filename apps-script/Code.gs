@@ -1,5 +1,5 @@
 const SPREADSHEET_ID = "1XYaMXKGR5EG8VS38PPiHFNbtmwX5Ae6N33jLE72nxKE";
-const BACKEND_VERSION = "sales-order-speed-v4-2026-07-16";
+const BACKEND_VERSION = "rack-inventory-v1-2026-07-17";
 
 
 const ROLES = {
@@ -19,7 +19,6 @@ const PERMISSIONS = {
     "salesOrders:actions",
     "salesOrders:send",
     "receiving:create",
-    "openingInventory:create",
     "inventory:view",
     "inventory:adjust",
     "scanner:lookup"
@@ -48,6 +47,7 @@ const CORE_SCHEMA = {
   RECEIVING: ["receiving_id", "po_id", "po_line_id", "supplier_id", "product_id", "scan_code", "internal_lot_id", "supplier_lot_number", "received_date", "received_by", "qty_received", "qty_damaged", "qty_accepted", "unit_type", "quality_score", "product_accuracy_score", "over_under_status", "recommended_location_id", "confirmed_location_id", "requires_supervisor_approval", "approval_status", "notes", "base_unit", "units_per_purchase_unit", "qty_accepted_base", "pallet_count", "quality_status"],
   LOTS: ["internal_lot_id", "product_id", "supplier_id", "supplier_lot_number", "po_id", "po_line_id", "received_date", "original_qty", "current_qty_script", "unit_type", "unit_cost", "currency", "current_location_id", "status", "expiration_date", "qr_value", "label_printed_status", "label_printed_at", "created_at", "updated_at", "notes", "purchase_qty_received", "purchase_unit_type", "pallet_count"],
   INVENTORY_MOVEMENTS: ["movement_id", "movement_type", "timestamp", "user_id", "product_id", "internal_lot_id", "package_id", "qty_change", "unit_type", "from_location_id", "to_location_id", "related_po_id", "related_receiving_id", "related_sales_order_id", "related_pick_task_id", "related_amazon_order_id", "scan_code", "device_id", "approval_status", "notes"],
+  ADJUSTMENTS: ["adjustment_id", "created_at", "created_by", "product_id", "internal_lot_id", "location_id", "qty_adjustment", "unit_type", "reason_code", "approval_status", "approved_by", "approved_at", "related_movement_id", "notes"],
   SALES_ORDERS: ["sales_order_id", "channel", "order_source", "customer_name", "customer_email", "customer_phone", "amazon_order_id", "order_date", "ship_by_date", "status", "currency", "subtotal_amount", "tax_amount", "shipping_amount", "total_amount", "invoice_status", "quickbooks_invoice_id", "created_by", "created_at", "updated_at", "notes", "customer_id", "ship_method", "payment_terms", "tax_enabled", "tax_rate", "estimated_gross_profit", "estimated_gross_margin_percent", "confirmed_at", "picked_at", "shipped_at", "delivered_at", "delivered_by", "delivery_notes", "bl_folio", "shipping_address"],
   SALES_ORDER_LINES: ["sales_order_line_id", "sales_order_id", "channel", "amazon_order_item_id", "product_id", "amazon_sku", "wholesale_sku", "qty_ordered", "qty_picked", "qty_remaining", "unit_type", "unit_price", "currency", "line_total", "preferred_internal_lot_id", "preferred_location_id", "line_status", "notes", "unit_weight_lbs", "inventory_qty_required", "inventory_unit_type", "unit_cost", "estimated_gross_profit", "expiration_date", "fefo_status"],
   PICK_TASKS: ["pick_task_id", "sales_order_id", "sales_order_line_id", "channel", "task_date", "priority", "product_id", "recommended_internal_lot_id", "recommended_location_id", "qty_to_pick", "qty_picked", "unit_type", "assigned_to", "pick_status", "picked_at", "scan_code", "device_id", "exception_code", "notes", "qty_to_pick_base", "reservation_status"],
@@ -79,7 +79,6 @@ function handleApiRequest_(action, payloadText, callback) {
       authenticateUser,
       listProducts,
       listLots,
-      createOpeningInventory,
       listUsers,
       createUser,
       deactivateUser,
@@ -105,6 +104,8 @@ function handleApiRequest_(action, payloadText, callback) {
       recordAmazonOutbound,
       listAmazonOutboundActivity,
       inventorySnapshot,
+      getRackInventory,
+      saveRackInventory,
       getOperationalReports,
       lookupScan,
       matchAmazonPackageScan,
@@ -1300,62 +1301,6 @@ function refreshPurchaseOrderStatus_(poId) {
   updateTableRecord_("PURCHASE_ORDERS", "po_id", poId, fields);
 }
 
-function createOpeningInventory(payload) {
-  payload = payload || {};
-  const user = payload.user || {};
-  requirePermission_(user, "openingInventory:create");
-  const input = payload.input || {};
-  if (!input.product_name && !input.product_id) throw new Error("Product is required.");
-  const product = input.product_id ? byId_(readTable_("PRODUCTS"), "product_id")[input.product_id] : createProduct({ user, input });
-  const qty = number_(input.qty || input.quantity, 0);
-  const unitWeight = number_(input.purchase_unit_weight || input.case_weight_lbs, 1);
-  if (qty <= 0) throw new Error("Quantity must be greater than zero.");
-  const lotId = nextId_("LOTS", "internal_lot_id", "LOT");
-  const baseQty = qty * unitWeight;
-  const locationId = input.location_id || (Array.isArray(input.location_ids) ? input.location_ids[0] : "");
-  const lot = {
-    internal_lot_id: lotId,
-    product_id: product.product_id,
-    supplier_lot_number: input.supplier_lot_number || "OPENING",
-    received_date: today_(),
-    original_qty: baseQty,
-    current_qty_script: baseQty,
-    unit_type: "LB",
-    unit_cost: number_(input.unit_cost, 0),
-    currency: input.currency || "USD",
-    current_location_id: locationId,
-    status: "ACTIVE",
-    qr_value: lotId,
-    created_at: today_(),
-    updated_at: today_(),
-    notes: input.notes || "Opening inventory count.",
-    purchase_qty_received: qty,
-    purchase_unit_type: input.purchase_unit || "UNIT",
-    pallet_count: number_(input.pallet_count, 0)
-  };
-  const movement = {
-    movement_id: nextId_("INVENTORY_MOVEMENTS", "movement_id", "MOV"),
-    movement_type: "OPENING_INVENTORY",
-    timestamp: today_(),
-    user_id: user.user_id || user.role,
-    product_id: product.product_id,
-    internal_lot_id: lotId,
-    qty_change: baseQty,
-    unit_type: "LB",
-    from_location_id: "OPENING_COUNT",
-    to_location_id: locationId,
-    scan_code: lotId,
-    device_id: "WEB_APP",
-    approval_status: "APPROVED",
-    notes: input.notes || ""
-  };
-  appendRecord_("LOTS", lot);
-  appendRecord_("INVENTORY_MOVEMENTS", movement);
-  writeAuditLog_({ user_id: user.user_id, role: user.role, action_type: "OPENING_INVENTORY", table_name: "LOTS", record_id: lotId });
-  return { product, lot, movement };
-}
-
-
 function listSalesOrders(payload) {
   const customers = byId_(readTable_("SUPPLIERS"), "supplier_id");
   const products = byId_(readTable_("PRODUCTS"), "product_id");
@@ -2021,6 +1966,268 @@ function recordInventoryMovement(payload) {
   return withScriptLock_(function () {
     return recordInventoryMovementInternal_(user, input);
   });
+}
+
+
+function getRackInventory() {
+  const products = byId_(readTable_("PRODUCTS"), "product_id");
+  const locations = readTable_("LOCATIONS").filter(isActiveRecord_);
+  const reserved = reservedInventory_();
+  const lotsByLocation = {};
+
+  readTable_("LOTS").forEach((lot) => {
+    const locationId = String(lot.current_location_id || "").trim();
+    const currentQty = number_(lot.current_qty_script !== "" && lot.current_qty_script !== undefined ? lot.current_qty_script : lot.original_qty, 0);
+    const status = String(lot.status || "ACTIVE").trim().toUpperCase();
+    if (!locationId || currentQty <= 0.0001 || ["EMPTY", "DEPLETED", "RETURNED"].indexOf(status) >= 0) return;
+    if (!lotsByLocation[locationId]) lotsByLocation[locationId] = [];
+    lotsByLocation[locationId].push({ lot, currentQty });
+  });
+
+  const spaces = locations.map((location) => {
+    const locationId = String(location.location_id || "");
+    const matches = (lotsByLocation[locationId] || []).sort((a, b) =>
+      String(a.lot.internal_lot_id || "").localeCompare(String(b.lot.internal_lot_id || ""), undefined, { numeric: true })
+    );
+    const current = matches[0] || null;
+    const lot = current ? current.lot : null;
+    const product = lot ? products[lot.product_id] || {} : {};
+    const unitWeight = lot ? lotUnitWeightV2_(lot) : 0;
+    const reservationKey = lot ? [lot.product_id, lot.internal_lot_id, locationId].join("|") : "";
+    const reservedQty = reservationKey ? number_(reserved[reservationKey], 0) : 0;
+
+    return {
+      location_id: locationId,
+      rack: location.rack || locationId.split("-")[0] || "",
+      level: location.level || "",
+      bin: location.bin || "",
+      zone: location.zone || "",
+      location_status: location.current_status || "AVAILABLE",
+      can_add_inventory: !locationHardBlockReason_(location),
+      occupied: Boolean(current),
+      conflict: matches.length > 1,
+      conflict_lot_ids: matches.map((entry) => entry.lot.internal_lot_id),
+      internal_lot_id: lot ? lot.internal_lot_id || "" : "",
+      product_id: lot ? lot.product_id || "" : "",
+      product_name: lot ? product.product_name || lot.product_id || "" : "",
+      supplier_lot_number: lot ? lot.supplier_lot_number || "" : "",
+      current_base_qty: current ? current.currentQty : 0,
+      base_unit: lot ? lot.unit_type || product.base_unit || "LB" : "",
+      purchase_unit_type: lot ? lot.purchase_unit_type || "UNIT" : "",
+      unit_weight: unitWeight,
+      current_purchase_units: unitWeight > 0 && current ? current.currentQty / unitWeight : 0,
+      reserved_base_qty: reservedQty,
+      reserved_purchase_units: unitWeight > 0 ? reservedQty / unitWeight : 0
+    };
+  }).sort(compareRackSpaces_);
+
+  return {
+    generated_at: today_(),
+    spaces,
+    rack_count: Array.from(new Set(spaces.map((space) => space.rack).filter(Boolean))).length,
+    occupied_count: spaces.filter((space) => space.occupied).length,
+    conflict_count: spaces.filter((space) => space.conflict).length
+  };
+}
+
+
+function compareRackSpaces_(a, b) {
+  const rack = String(a.rack || "").localeCompare(String(b.rack || ""), undefined, { numeric: true });
+  if (rack) return rack;
+  const levelA = number_(String(a.level || "").replace(/\D/g, ""), 0);
+  const levelB = number_(String(b.level || "").replace(/\D/g, ""), 0);
+  if (levelA !== levelB) return levelB - levelA;
+  const binRank = { F: 0, M: 1, B: 2 };
+  return (binRank[String(a.bin || "").toUpperCase()] ?? 9) - (binRank[String(b.bin || "").toUpperCase()] ?? 9);
+}
+
+
+function saveRackInventory(payload) {
+  payload = payload || {};
+  const user = payload.user || {};
+  const input = payload.input || payload;
+  requirePermission_(user, "inventory:adjust");
+
+  return withScriptLock_(function () {
+    ensureTableColumns_("ADJUSTMENTS", CORE_SCHEMA.ADJUSTMENTS);
+    const locationId = String(input.location_id || "").trim();
+    const purchaseUnits = Number(input.purchase_units);
+    if (!locationId) throw new Error("Choose a rack space.");
+    if (!Number.isFinite(purchaseUnits) || purchaseUnits < 0) throw new Error("Enter a valid amount of purchase units.");
+
+    const location = readTable_("LOCATIONS").find((row) => String(row.location_id) === locationId);
+    if (!location || !isActiveRecord_(location)) throw new Error("This rack space is not active.");
+
+    const positiveLots = readTable_("LOTS").filter((lot) => {
+      const qty = number_(lot.current_qty_script !== "" && lot.current_qty_script !== undefined ? lot.current_qty_script : lot.original_qty, 0);
+      const status = String(lot.status || "ACTIVE").trim().toUpperCase();
+      return String(lot.current_location_id || "") === locationId
+        && qty > 0.0001
+        && ["EMPTY", "DEPLETED", "RETURNED"].indexOf(status) < 0;
+    });
+    if (positiveLots.length > 1) throw new Error("This space contains conflicting inventory records. Resolve the duplicate before editing it.");
+
+    const existingLot = positiveLots[0] || null;
+    const expectedLotId = String(input.internal_lot_id || "").trim();
+    if (existingLot && expectedLotId && String(existingLot.internal_lot_id) !== expectedLotId) {
+      throw new Error("This rack space changed after it was opened. Refresh and try again.");
+    }
+    if (!existingLot && expectedLotId) {
+      throw new Error("This inventory was already changed. Refresh and try again.");
+    }
+
+    if (existingLot) return updateExistingRackLot_(user, input, location, existingLot, purchaseUnits);
+    return addRackLot_(user, input, location, purchaseUnits);
+  });
+}
+
+
+function updateExistingRackLot_(user, input, location, lot, purchaseUnits) {
+  const currentBaseQty = number_(lot.current_qty_script !== "" && lot.current_qty_script !== undefined ? lot.current_qty_script : lot.original_qty, 0);
+  if (input.expected_base_qty !== undefined && input.expected_base_qty !== "") {
+    const expectedBaseQty = Number(input.expected_base_qty);
+    if (!Number.isFinite(expectedBaseQty) || !approximatelyEqual_(currentBaseQty, expectedBaseQty, 0.001)) {
+      throw new Error("This quantity changed after it was opened. Refresh and try again.");
+    }
+  }
+
+  const unitWeight = lotUnitWeightV2_(lot);
+  if (!(unitWeight > 0)) throw new Error("This lot is missing its purchase-unit weight.");
+  const nextBaseQty = Math.round(purchaseUnits * unitWeight * 1000000) / 1000000;
+  const reservationKey = [lot.product_id, lot.internal_lot_id, location.location_id].join("|");
+  const reservedBaseQty = number_(reservedInventory_()[reservationKey], 0);
+  if (nextBaseQty + 0.0001 < reservedBaseQty) {
+    const reservedUnits = reservedBaseQty / unitWeight;
+    throw new Error(`This lot has ${reservedUnits} ${lot.purchase_unit_type || "units"} reserved for open Sales Orders.`);
+  }
+
+  const difference = nextBaseQty - currentBaseQty;
+  if (Math.abs(difference) <= 0.0001) {
+    return { changed: false, rack_inventory: getRackInventory() };
+  }
+
+  const movementType = difference > 0 ? "ADJUST_IN" : "ADJUST_OUT";
+  const note = String(input.notes || `Rack inventory set to ${purchaseUnits} ${lot.purchase_unit_type || "units"}.`).trim();
+  const movement = recordInventoryMovementInternal_(user, {
+    internal_lot_id: lot.internal_lot_id,
+    movement_type: movementType,
+    qty_change: difference,
+    unit_type: lot.unit_type || "LB",
+    location_id: location.location_id,
+    approval_status: "APPROVED",
+    notes: note
+  });
+  const adjustment = appendRackAdjustment_(user, lot, location.location_id, difference, movement, note);
+  writeAuditLog_({
+    user_id: user.user_id,
+    role: user.role,
+    action_type: "SET_RACK_INVENTORY",
+    table_name: "LOTS",
+    record_id: lot.internal_lot_id,
+    field_name: "current_qty_script",
+    old_value: currentBaseQty,
+    new_value: nextBaseQty,
+    source_screen: "RACK_INVENTORY",
+    notes: note
+  });
+  return { changed: true, movement, adjustment, rack_inventory: getRackInventory() };
+}
+
+
+function addRackLot_(user, input, location, purchaseUnits) {
+  if (purchaseUnits <= 0) throw new Error("Enter an amount greater than zero when adding inventory.");
+  const hardBlock = locationHardBlockReason_(location);
+  if (hardBlock) throw new Error(`This rack space cannot receive inventory (${hardBlock}).`);
+
+  const productId = String(input.product_id || "").trim();
+  const product = readTable_("PRODUCTS").find((row) => String(row.product_id) === productId && isActiveRecord_(row));
+  if (!product) throw new Error("Choose an active product.");
+  if (!locationAllowsProduct_(location, product)) throw new Error("This rack space does not allow that product category.");
+
+  const supplierLotNumber = String(input.supplier_lot_number || "").trim();
+  const purchaseUnitType = String(input.purchase_unit_type || "").trim();
+  const unitWeight = Number(input.unit_weight);
+  if (!supplierLotNumber) throw new Error("Enter the supplier lot number.");
+  if (!purchaseUnitType) throw new Error("Enter the purchase-unit type.");
+  if (!Number.isFinite(unitWeight) || unitWeight <= 0) throw new Error("Enter a valid amount per purchase unit.");
+
+  const baseQty = Math.round(purchaseUnits * unitWeight * 1000000) / 1000000;
+  const lotId = nextId_("LOTS", "internal_lot_id", "LOT");
+  const lot = {
+    internal_lot_id: lotId,
+    product_id: productId,
+    supplier_id: input.supplier_id || "",
+    supplier_lot_number: supplierLotNumber,
+    received_date: today_(),
+    original_qty: baseQty,
+    current_qty_script: 0,
+    unit_type: product.base_unit || "LB",
+    unit_cost: number_(input.unit_cost, 0),
+    currency: input.currency || "USD",
+    current_location_id: location.location_id,
+    status: "EMPTY",
+    qr_value: lotId,
+    created_at: today_(),
+    updated_at: today_(),
+    notes: input.notes || "Added from Rack Inventory.",
+    purchase_qty_received: purchaseUnits,
+    purchase_unit_type: purchaseUnitType,
+    pallet_count: 1
+  };
+
+  const lotWrite = appendRecord_("LOTS", lot);
+  let movement = null;
+  try {
+    const note = String(input.notes || `Added ${purchaseUnits} ${purchaseUnitType} from Rack Inventory.`).trim();
+    movement = recordInventoryMovementInternal_(user, {
+      internal_lot_id: lotId,
+      movement_type: "ADJUST_IN",
+      qty_change: baseQty,
+      unit_type: lot.unit_type,
+      location_id: location.location_id,
+      approval_status: "APPROVED",
+      notes: note
+    });
+    const adjustment = appendRackAdjustment_(user, lot, location.location_id, baseQty, movement, note);
+    writeAuditLog_({
+      user_id: user.user_id,
+      role: user.role,
+      action_type: "ADD_RACK_INVENTORY",
+      table_name: "LOTS",
+      record_id: lotId,
+      field_name: "current_qty_script",
+      old_value: 0,
+      new_value: baseQty,
+      source_screen: "RACK_INVENTORY",
+      notes: note
+    });
+    return { changed: true, movement, adjustment, rack_inventory: getRackInventory() };
+  } catch (error) {
+    if (!movement) rollbackAppendedRange_(lotWrite);
+    throw error;
+  }
+}
+
+
+function appendRackAdjustment_(user, lot, locationId, difference, movement, notes) {
+  const adjustment = {
+    adjustment_id: nextId_("ADJUSTMENTS", "adjustment_id", "ADJ"),
+    created_at: today_(),
+    created_by: user.user_id || user.role,
+    product_id: lot.product_id,
+    internal_lot_id: lot.internal_lot_id,
+    location_id: locationId,
+    qty_adjustment: difference,
+    unit_type: lot.unit_type || "LB",
+    reason_code: "PHYSICAL_RECOUNT",
+    approval_status: "APPROVED",
+    approved_by: user.user_id || user.role,
+    approved_at: today_(),
+    related_movement_id: movement.movement_id,
+    notes: notes || ""
+  };
+  appendRecord_("ADJUSTMENTS", adjustment);
+  return adjustment;
 }
 
 

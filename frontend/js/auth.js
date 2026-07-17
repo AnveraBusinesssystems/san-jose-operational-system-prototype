@@ -1,4 +1,4 @@
-import { authenticateUser } from "./api-smooth1.js?v=pin1";
+import { authenticateUser } from "./api-smooth1.js?v=rack-inventory1";
 
 const SESSION_KEY = "sjops.session";
 const DEFAULT_PIN = "1014";

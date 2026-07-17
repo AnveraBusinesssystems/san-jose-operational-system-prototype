@@ -1,5 +1,5 @@
 import { clearApiCache, getSalesOrderDetail, inventorySnapshot } from "./api-smooth1.js?v=delivery1";
-import { GOOGLE_SCRIPT_WEB_APP_URL } from "./config.js?v=opening1";
+import { GOOGLE_SCRIPT_WEB_APP_URL } from "./config.js?v=rack-inventory1";
 import { escapeHtml, formatQuantity, notice, status } from "./utils.js?v=filters1";
 
 const OPEN_STATUSES = new Set(["CONFIRMED", "PARTIALLY_PICKED", "PARTIAL", "PICKED", "SHIPPED"]);

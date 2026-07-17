@@ -137,7 +137,7 @@ function inventoryPlanning(reports) {
     </div>
     <div class="formula-note">
       <strong>How this works:</strong>
-      Opening Inventory cost is treated as cost per purchase unit/case. The backend converts it to cost per LB before calculating inventory value. Avg Daily Usage, Avg Lead, Demand During Lead, Safety Stock, Reorder Point, Target Stock, and Recommended Qty are intentionally blank until the product has real outbound movement history.
+      Historical opening inventory cost is treated as cost per purchase unit/case. The backend converts it to cost per LB before calculating inventory value. Avg Daily Usage, Avg Lead, Demand During Lead, Safety Stock, Reorder Point, Target Stock, and Recommended Qty are intentionally blank until the product has real outbound movement history.
     </div>
     <div id="productAnalyticsPanel" class="product-analytics-panel" hidden></div>
     ${rows.length ? table([
@@ -157,7 +157,7 @@ function inventoryPlanning(reports) {
       { label: "Recommended Qty", render: (row) => quantity(row.recommended_order_qty) },
       { label: "Status", render: (row) => status(row.planning_status || row.status) },
       { label: "Reason", render: (row) => escapeHtml(row.reason || "") }
-    ], rows) : emptyState("No inventory planning rows yet", "Add opening inventory to build the current LB and inventory value report.")}
+    ], rows) : emptyState("No inventory planning rows yet", "Receive product or add it from Rack Inventory to build the current inventory value report.")}
   `;
 }
 
@@ -238,7 +238,7 @@ function inventorySnapshot(reports) {
       { label: "Inventory Value", render: (row) => money(row.inventory_value || 0) },
       { label: "Status", render: (row) => status(row.value_status || row.inventory_status || "AVAILABLE") },
       { label: "Days Since Received", render: (row) => quantity(row.days_since_received ?? "") }
-    ], rows) : emptyState("No active lots found", "Receive product or add opening inventory to build the stock snapshot.")}
+    ], rows) : emptyState("No active lots found", "Receive product or add it from Rack Inventory to build the stock snapshot.")}
   `;
 }
 

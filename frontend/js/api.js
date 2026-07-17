@@ -1,6 +1,6 @@
 import { requirePermission } from "./permissions.js?v=orders1";
 import { numberValue, today, uid } from "./utils.js?v=orders1";
-import { GOOGLE_SCRIPT_WEB_APP_URL } from "./config.js?v=opening1";
+import { GOOGLE_SCRIPT_WEB_APP_URL } from "./config.js?v=rack-inventory1";
 
 const DB_KEY = "sjops.database.v1";
 const APPS_CACHE_PREFIX = "sjops.apps.cache.";
@@ -20,6 +20,7 @@ const READ_ACTIONS = new Set([
   "getSalesOrderDetail",
   "listAmazonOutboundActivity",
   "inventorySnapshot",
+  "getRackInventory",
   "getOperationalReports"
 ]);
 
@@ -128,39 +129,6 @@ export function warmOperationalCache() {
     window.setTimeout(() => {
       callAppsScript(action).catch(() => {});
     }, index * 350);
-  });
-}
-
-async function legacyCallAppsScript(action, payload = {}) {
-  return new Promise((resolve, reject) => {
-    const callback = `sjopsCallback_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-    const script = document.createElement("script");
-    const url = new URL(GOOGLE_SCRIPT_WEB_APP_URL);
-    url.searchParams.set("action", action);
-    url.searchParams.set("payload", JSON.stringify(payload));
-    url.searchParams.set("callback", callback);
-
-    const cleanup = () => {
-      delete window[callback];
-      script.remove();
-    };
-
-    window[callback] = (data) => {
-      cleanup();
-      if (!data.ok) {
-        reject(new Error(data.error || "Apps Script request failed."));
-        return;
-      }
-      resolve(data.result);
-    };
-
-    script.onerror = () => {
-      cleanup();
-      reject(new Error("Could not reach Apps Script. Check deployment access and version."));
-    };
-
-    script.src = url.toString();
-    document.body.appendChild(script);
   });
 }
 
@@ -360,63 +328,6 @@ export async function createProduct(user, input) {
   data.products.push(product);
   save();
   return product;
-}
-
-export async function createOpeningInventory(user, input) {
-  if (useAppsScript()) return callAppsScript("createOpeningInventory", { user, input });
-  requirePermission(user, "receiving:create");
-  const data = await db();
-  const name = String(input.product_name || "").trim();
-  const qty = numberValue(input.qty);
-  const weight = numberValue(input.purchase_unit_weight);
-  const locationIds = normalizeLocationIds(input);
-  const occupiedLocationIds = occupiedInventoryLocationIds(data);
-  const locations = locationIds.map((locationId) => data.locations.find((item) => item.location_id === locationId));
-  if (!name || qty <= 0 || weight <= 0 || !locations.length || locations.some((location) => !location)) throw new Error("Complete product, quantity, weight, and inventory space.");
-  if (locations.some((location) => String(location.current_status || "AVAILABLE").toUpperCase() !== "AVAILABLE")) throw new Error("Choose only available inventory spaces.");
-  if (locations.some((location) => occupiedLocationIds.has(location.location_id))) throw new Error("Choose only empty inventory spaces.");
-  let product = data.products.find((item) => item.product_name.toLowerCase() === name.toLowerCase());
-  if (!product) {
-    product = { product_id: uid("PROD", data.products, "product_id"), product_name: name, product_category: input.product_category || "General", base_unit: "LB", perishability_days: numberValue(input.perishability_days), barcode_or_qr_value: "", is_active: true };
-    product.barcode_or_qr_value = product.product_id;
-    data.products.push(product);
-  }
-  const lots = [];
-  const movements = [];
-  locations.forEach((location) => {
-    const lot = { internal_lot_id: uid("LOT", data.lots, "internal_lot_id"), product_id: product.product_id, supplier_lot_number: input.supplier_lot_number || "OPENING", original_qty: qty * weight, current_qty_script: qty * weight, unit_type: "LB", purchase_qty_received: qty, purchase_unit_type: input.purchase_unit, current_location_id: location.location_id, status: "ACTIVE", received_date: today(), qr_value: "", notes: "Opening inventory count." };
-    lot.qr_value = lot.internal_lot_id;
-    data.lots.push(lot);
-    const movement = { movement_id: uid("MOV", data.inventoryMovements, "movement_id"), movement_type: "OPENING_INVENTORY", timestamp: new Date().toISOString(), user_id: user.user_id, product_id: product.product_id, internal_lot_id: lot.internal_lot_id, qty_change: lot.original_qty, unit_type: "LB", from_location_id: "OPENING_COUNT", to_location_id: location.location_id, scan_code: lot.internal_lot_id, device_id: "WEB", approval_status: "APPROVED", notes: input.notes || "" };
-    data.inventoryMovements.push(movement);
-    location.current_status = "UNAVAILABLE";
-    lots.push(lot);
-    movements.push(movement);
-  });
-  save();
-  return { product, lot: lots[0], movement: movements[0], lots, movements };
-}
-
-function normalizeLocationIds(input) {
-  const raw = Array.isArray(input.location_ids) && input.location_ids.length
-    ? input.location_ids
-    : [input.location_id];
-  return Array.from(new Set(raw.map((value) => String(value || "").trim()).filter(Boolean)));
-}
-
-function occupiedInventoryLocationIds(data) {
-  const qtyByLocation = new Map();
-  data.inventoryMovements.forEach((movement) => {
-    const qtyChange = numberValue(movement.qty_change);
-    const locationId = qtyChange < 0
-      ? movement.from_location_id || movement.to_location_id || ""
-      : movement.to_location_id || movement.from_location_id || "";
-    if (!locationId) return;
-    qtyByLocation.set(locationId, numberValue(qtyByLocation.get(locationId)) + qtyChange);
-  });
-  return new Set(Array.from(qtyByLocation.entries())
-    .filter(([, qty]) => qty > 0)
-    .map(([locationId]) => locationId));
 }
 
 export async function updateProductStatus(user, productId, isActive) {
@@ -1263,6 +1174,187 @@ function recommendLocation(data, product) {
     return location.current_status === "AVAILABLE"
       && (!location.allowed_categories || location.allowed_categories === product.product_category);
   }) || data.locations[0];
+}
+
+export async function getRackInventory() {
+  if (useAppsScript()) return callAppsScript("getRackInventory");
+  return buildLocalRackInventory(await db());
+}
+
+export async function saveRackInventory(user, input) {
+  if (useAppsScript()) return callAppsScript("saveRackInventory", { user, input });
+  requirePermission(user, "inventory:adjust");
+  const data = await db();
+  const locationId = String(input.location_id || "").trim();
+  const purchaseUnits = Number(input.purchase_units);
+  const location = data.locations.find((item) => String(item.location_id) === locationId);
+  if (!location) throw new Error("Choose a valid rack space.");
+  if (!Number.isFinite(purchaseUnits) || purchaseUnits < 0) throw new Error("Enter a valid amount of purchase units.");
+
+  const positiveLots = data.lots.filter((lot) =>
+    String(lot.current_location_id || "") === locationId
+    && localLotCurrentQty(lot) > 0.0001
+    && !["EMPTY", "DEPLETED", "RETURNED"].includes(String(lot.status || "ACTIVE").toUpperCase())
+  );
+  if (positiveLots.length > 1) throw new Error("This space contains conflicting inventory records.");
+
+  const existing = positiveLots[0] || null;
+  if (existing && input.internal_lot_id && String(existing.internal_lot_id) !== String(input.internal_lot_id)) {
+    throw new Error("This rack space changed after it was opened. Refresh and try again.");
+  }
+  if (!existing && input.internal_lot_id) throw new Error("This inventory was already changed. Refresh and try again.");
+
+  let lot = existing;
+  let currentBaseQty = lot ? localLotCurrentQty(lot) : 0;
+  let unitWeight = lot ? localLotUnitWeight(lot) : Number(input.unit_weight);
+  if (!(unitWeight > 0)) throw new Error("Enter a valid amount per purchase unit.");
+
+  if (!lot) {
+    if (purchaseUnits <= 0) throw new Error("Enter an amount greater than zero when adding inventory.");
+    const product = data.products.find((item) => item.product_id === input.product_id && item.is_active !== false);
+    if (!product) throw new Error("Choose an active product.");
+    if (!String(input.supplier_lot_number || "").trim()) throw new Error("Enter the supplier lot number.");
+    if (!String(input.purchase_unit_type || "").trim()) throw new Error("Enter the purchase-unit type.");
+    if (["BLOCKED", "UNAVAILABLE", "OUT_OF_SERVICE", "MAINTENANCE", "INACTIVE"].includes(String(location.current_status || "AVAILABLE").toUpperCase())) {
+      throw new Error("This rack space cannot receive inventory.");
+    }
+    const baseQty = purchaseUnits * unitWeight;
+    lot = {
+      internal_lot_id: uid("LOT", data.lots, "internal_lot_id"),
+      product_id: product.product_id,
+      supplier_lot_number: String(input.supplier_lot_number).trim(),
+      received_date: today(),
+      original_qty: baseQty,
+      current_qty_script: 0,
+      unit_type: product.base_unit || "LB",
+      unit_cost: 0,
+      currency: "USD",
+      current_location_id: locationId,
+      status: "EMPTY",
+      purchase_qty_received: purchaseUnits,
+      purchase_unit_type: String(input.purchase_unit_type).trim(),
+      pallet_count: 1,
+      notes: input.notes || "Added from Rack Inventory."
+    };
+    lot.qr_value = lot.internal_lot_id;
+    data.lots.push(lot);
+  }
+
+  if (input.expected_base_qty !== undefined && input.expected_base_qty !== "" && Math.abs(currentBaseQty - Number(input.expected_base_qty)) > 0.001) {
+    throw new Error("This quantity changed after it was opened. Refresh and try again.");
+  }
+
+  const nextBaseQty = purchaseUnits * unitWeight;
+  const difference = nextBaseQty - currentBaseQty;
+  if (Math.abs(difference) <= 0.0001) return { changed: false, rack_inventory: buildLocalRackInventory(data) };
+
+  const reserved = buildReservedInventory(data).get(salesInventoryKey(lot.product_id, lot.internal_lot_id, locationId)) || 0;
+  if (nextBaseQty + 0.0001 < reserved) throw new Error("This inventory is reserved for open Sales Orders.");
+
+  lot.current_qty_script = nextBaseQty;
+  lot.status = nextBaseQty <= 0.0001 ? "EMPTY" : "ACTIVE";
+  lot.updated_at = new Date().toISOString();
+  const movement = {
+    movement_id: uid("MOV", data.inventoryMovements, "movement_id"),
+    movement_type: difference > 0 ? "ADJUST_IN" : "ADJUST_OUT",
+    timestamp: new Date().toISOString(),
+    user_id: user.user_id || user.role,
+    product_id: lot.product_id,
+    internal_lot_id: lot.internal_lot_id,
+    qty_change: difference,
+    unit_type: lot.unit_type || "LB",
+    from_location_id: difference < 0 ? locationId : "",
+    to_location_id: difference > 0 ? locationId : "OUTBOUND",
+    scan_code: lot.internal_lot_id,
+    device_id: "WEB_APP",
+    approval_status: "APPROVED",
+    notes: input.notes || "Rack inventory correction."
+  };
+  data.inventoryMovements.push(movement);
+  data.adjustments ||= [];
+  const adjustment = {
+    adjustment_id: uid("ADJ", data.adjustments, "adjustment_id"),
+    created_at: new Date().toISOString(),
+    created_by: user.user_id || user.role,
+    product_id: lot.product_id,
+    internal_lot_id: lot.internal_lot_id,
+    location_id: locationId,
+    qty_adjustment: difference,
+    unit_type: lot.unit_type || "LB",
+    reason_code: "PHYSICAL_RECOUNT",
+    approval_status: "APPROVED",
+    approved_by: user.user_id || user.role,
+    approved_at: new Date().toISOString(),
+    related_movement_id: movement.movement_id,
+    notes: movement.notes
+  };
+  data.adjustments.push(adjustment);
+  save();
+  return { changed: true, movement, adjustment, rack_inventory: buildLocalRackInventory(data) };
+}
+
+function buildLocalRackInventory(data) {
+  const products = new Map(data.products.map((product) => [product.product_id, product]));
+  const reserved = buildReservedInventory(data);
+  const lotsByLocation = new Map();
+  data.lots.forEach((lot) => {
+    const qty = localLotCurrentQty(lot);
+    if (qty <= 0.0001 || ["EMPTY", "DEPLETED", "RETURNED"].includes(String(lot.status || "ACTIVE").toUpperCase())) return;
+    const id = String(lot.current_location_id || "");
+    if (!id) return;
+    if (!lotsByLocation.has(id)) lotsByLocation.set(id, []);
+    lotsByLocation.get(id).push(lot);
+  });
+  const spaces = data.locations.filter((location) => location.is_active !== false).map((location) => {
+    const matches = lotsByLocation.get(String(location.location_id)) || [];
+    const lot = matches[0] || null;
+    const product = lot ? products.get(lot.product_id) || {} : {};
+    const unitWeight = lot ? localLotUnitWeight(lot) : 0;
+    const currentBaseQty = lot ? localLotCurrentQty(lot) : 0;
+    const reservedBaseQty = lot ? reserved.get(salesInventoryKey(lot.product_id, lot.internal_lot_id, location.location_id)) || 0 : 0;
+    return {
+      location_id: location.location_id,
+      rack: location.rack || String(location.location_id).split("-")[0],
+      level: location.level || "",
+      bin: location.bin || "",
+      zone: location.zone || "",
+      location_status: location.current_status || "AVAILABLE",
+      can_add_inventory: !["BLOCKED", "UNAVAILABLE", "OUT_OF_SERVICE", "MAINTENANCE", "INACTIVE"].includes(String(location.current_status || "AVAILABLE").toUpperCase()),
+      occupied: Boolean(lot),
+      conflict: matches.length > 1,
+      conflict_lot_ids: matches.map((item) => item.internal_lot_id),
+      internal_lot_id: lot?.internal_lot_id || "",
+      product_id: lot?.product_id || "",
+      product_name: lot ? product.product_name || lot.product_id : "",
+      supplier_lot_number: lot?.supplier_lot_number || "",
+      current_base_qty: currentBaseQty,
+      base_unit: lot?.unit_type || "",
+      purchase_unit_type: lot?.purchase_unit_type || "",
+      unit_weight: unitWeight,
+      current_purchase_units: unitWeight > 0 ? currentBaseQty / unitWeight : 0,
+      reserved_base_qty: reservedBaseQty,
+      reserved_purchase_units: unitWeight > 0 ? reservedBaseQty / unitWeight : 0
+    };
+  });
+  return {
+    generated_at: new Date().toISOString(),
+    spaces,
+    rack_count: new Set(spaces.map((space) => space.rack)).size,
+    occupied_count: spaces.filter((space) => space.occupied).length,
+    conflict_count: spaces.filter((space) => space.conflict).length
+  };
+}
+
+function localLotUnitWeight(lot) {
+  const purchaseQty = numberValue(lot.purchase_qty_received);
+  const originalQty = numberValue(lot.original_qty);
+  return purchaseQty > 0 && originalQty > 0 ? originalQty / purchaseQty : 0;
+}
+
+function localLotCurrentQty(lot) {
+  return lot.current_qty_script !== "" && lot.current_qty_script !== undefined
+    ? numberValue(lot.current_qty_script)
+    : numberValue(lot.original_qty);
 }
 
 export async function inventorySnapshot() {

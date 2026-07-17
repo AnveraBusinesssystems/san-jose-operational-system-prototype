@@ -24,7 +24,7 @@ Camera QR scanning requires a browser that allows camera access. On many phones,
 
 - `ADMIN`: all screens and actions.
 - `MANAGER`: operations screens, catalog edits, PO work, reports.
-- `OPERATOR`: receiving, inventory lookup, scanner test, and Amazon package scan.
+- `OPERATOR`: receiving, rack inventory viewing, scanner test, and Amazon package scan.
 
 ## Useful Test Scan Values
 

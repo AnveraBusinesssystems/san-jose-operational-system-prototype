@@ -1,6 +1,6 @@
-import * as base from "./api.js?v=pin1";
+import * as base from "./api.js?v=rack-inventory1";
 import { createSalesOrderReliable } from "./sales-order-api.js?v=1";
-import { GOOGLE_SCRIPT_WEB_APP_URL } from "./config.js?v=opening1";
+import { GOOGLE_SCRIPT_WEB_APP_URL } from "./config.js?v=rack-inventory1";
 
 const READ_CACHE_TTL_MS = 45000;
 const readCache = new Map();
@@ -18,7 +18,7 @@ export function warmOperationalCache() {
     () => listSuppliers(),
     () => listPurchaseOrders(),
     () => listSalesOrders(),
-    () => inventorySnapshot()
+    () => getRackInventory()
   ].forEach((load, index) => {
     window.setTimeout(() => load().catch(() => {}), index * 350);
   });
@@ -41,6 +41,7 @@ export const listPurchaseOrders = async () => (await cachedRead("listPurchaseOrd
   .map(normalizePurchaseOrderStatus);
 export const listSalesOrders = () => cachedRead("listSalesOrders", [], base.listSalesOrders);
 export const inventorySnapshot = () => cachedRead("inventorySnapshot", [], base.inventorySnapshot);
+export const getRackInventory = () => cachedRead("getRackInventory", [], base.getRackInventory);
 export const getOperationalReports = () => cachedRead("getOperationalReports", [], base.getOperationalReports);
 export const getPurchaseOrderDetail = (poId) => cachedRead("getPurchaseOrderDetail", [poId], () => base.getPurchaseOrderDetail(poId));
 export const getSalesOrderDetail = (salesOrderId) => cachedRead("getSalesOrderDetail", [salesOrderId], () => base.getSalesOrderDetail(salesOrderId));
@@ -49,8 +50,6 @@ export const listAmazonOutboundActivity = () => cachedRead("listAmazonOutboundAc
 export async function createProduct(user, input) {
   return mutate(() => base.createProduct(user, input));
 }
-export async function createOpeningInventory(user, input) { return mutate(() => base.createOpeningInventory(user, input)); }
-
 export async function createUser(user, input) {
   return mutate(() => base.createUser(user, input));
 }
@@ -90,6 +89,10 @@ export async function receiveProduct(user, input) {
 
 export async function recordInventoryMovement(user, input) {
   return mutate(() => base.recordInventoryMovement(user, input));
+}
+
+export async function saveRackInventory(user, input) {
+  return mutate(() => base.saveRackInventory(user, input));
 }
 
 export async function recordAmazonOutbound(user, input) {

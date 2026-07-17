@@ -4,7 +4,7 @@
 
 1. Admin or Manager adds products.
 2. Admin or Manager adds suppliers.
-3. QR/barcode values can be tested immediately in Scanner Test or Inventory Lookup.
+3. QR/barcode values can be tested immediately in Scanner Test; current stock is organized by location in Rack Inventory.
 
 ## Purchase Order
 

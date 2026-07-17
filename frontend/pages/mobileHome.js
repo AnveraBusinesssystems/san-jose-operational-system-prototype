@@ -1,4 +1,4 @@
-import { allowedPages } from "../js/permissions.js?v=send-ui1";
+import { allowedPages } from "../js/permissions.js?v=rack-inventory1";
 import { navigate } from "../js/router.js?v=send2";
 
 const GROUPS = [
@@ -25,8 +25,7 @@ const GROUPS = [
     label: "Receiving",
     icon: "receiving",
     pages: [
-      ["receiving", "Receive Product"],
-      ["openingInventory", "Opening Inventory"]
+      ["receiving", "Receive Product"]
     ]
   },
   {
@@ -34,7 +33,7 @@ const GROUPS = [
     label: "Inventory",
     icon: "inventory",
     pages: [
-      ["inventory", "Inventory Lookup"],
+      ["inventory", "Rack Inventory"],
       ["scanner", "Scanner"],
       ["products", "Products"]
     ]

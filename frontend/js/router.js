@@ -1,4 +1,4 @@
-import { allowedPages } from "./permissions.js?v=nav-orders2";
+import { allowedPages } from "./permissions.js?v=rack-inventory1";
 
 let currentPage = "dashboard";
 let routes = {};
@@ -9,10 +9,6 @@ export function configureRouter(routeMap, routeCallback) {
   routes = routeMap;
   onRoute = routeCallback;
   window.addEventListener("hashchange", renderRoute);
-}
-
-export function currentRoute() {
-  return currentPage;
 }
 
 export function navigate(page) {

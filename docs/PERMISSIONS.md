@@ -16,7 +16,7 @@ Can access:
 
 - Dashboard
 - Receive Product
-- Inventory Lookup
+- Rack Inventory (view only)
 - Scanner Test
 - Amazon Match
 

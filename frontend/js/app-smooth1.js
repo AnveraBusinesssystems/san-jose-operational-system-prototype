@@ -1,7 +1,7 @@
-import { warmOperationalCache } from "./api-smooth1.js?v=login-repair1";
-import { getSession, signIn, signOut } from "./auth.js?v=login-repair1";
-import { renderNavigation, renderRoute, configureRouter, navigate } from "./router.js?v=login-repair1";
-import { allowedPages } from "./permissions.js?v=login-repair1";
+import { warmOperationalCache } from "./api-smooth1.js?v=rack-inventory1";
+import { getSession, signIn, signOut } from "./auth.js?v=rack-inventory1";
+import { renderNavigation, renderRoute, configureRouter, navigate } from "./router.js?v=rack-inventory1";
+import { allowedPages } from "./permissions.js?v=rack-inventory1";
 import { enableTableFilters, enableTableSorting } from "./utils.js?v=login-repair1";
 import * as dashboard from "../pages/dashboard.js?v=login-repair1";
 import * as products from "../pages/products.js?v=login-repair1";
@@ -10,13 +10,12 @@ import * as orders from "../pages/orders.js?v=login-repair1";
 import * as purchaseOrders from "../pages/purchaseOrders.js?v=login-repair1";
 import * as salesOrders from "../pages/salesOrdersProfessional.js?v=login-repair1";
 import * as receiving from "../pages/receiving.js?v=login-repair1";
-import * as openingInventory from "../pages/openingInventory.js?v=login-repair1";
-import * as inventory from "../pages/inventory.js?v=login-repair1";
+import * as inventory from "../pages/inventory.js?v=rack-inventory1";
 import * as scanner from "../pages/scannerTest.js?v=login-repair1";
 import * as amazon from "../pages/amazon.js?v=login-repair1";
 import * as reports from "../pages/reports.js?v=login-repair1";
 import * as admin from "../pages/admin.js?v=login-repair1";
-import * as mobileHome from "../pages/mobileHome.js?v=login-repair1";
+import * as mobileHome from "../pages/mobileHome.js?v=rack-inventory1";
 import * as sendProduct from "../pages/sendProductSafe.js?v=login-repair1";
 
 const view = document.getElementById("view");
@@ -42,7 +41,6 @@ const routes = {
   salesOrders,
   sendProduct,
   receiving,
-  openingInventory,
   inventory,
   scanner,
   amazon,

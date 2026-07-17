@@ -1,4 +1,4 @@
-import { GOOGLE_SCRIPT_WEB_APP_URL } from "./config.js?v=opening1";
+import { GOOGLE_SCRIPT_WEB_APP_URL } from "./config.js?v=rack-inventory1";
 import { getPurchaseOrderDetail, listLocations } from "./api-smooth1.js?v=receiving-pallets1";
 
 const USES_APPS_SCRIPT = Boolean(GOOGLE_SCRIPT_WEB_APP_URL && GOOGLE_SCRIPT_WEB_APP_URL.includes("/exec"));
