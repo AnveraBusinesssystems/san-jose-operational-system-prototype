@@ -1,6 +1,6 @@
-import { getRackInventory, listProducts, saveRackInventory } from "../js/api-smooth1.js?v=rack-inventory1";
-import { can } from "../js/permissions.js?v=rack-inventory1";
-import { escapeHtml, formatQuantity, notice } from "../js/utils.js?v=rack-inventory1";
+import { getRackInventory, listProducts, saveRackInventory } from "../js/api-smooth1.js?v=rack-inventory3";
+import { can } from "../js/permissions.js?v=rack-inventory3";
+import { escapeHtml, formatQuantity, notice } from "../js/utils.js?v=rack-inventory3";
 
 const LEVELS = ["L3", "L2", "L1"];
 const BINS = ["F", "M", "B"];
@@ -15,9 +15,17 @@ export async function render(ctx) {
   renderPage(ctx);
 }
 
-function renderPage(ctx) {
+function renderPage(ctx, options = {}) {
   const spaces = Array.isArray(inventoryData?.spaces) ? inventoryData.spaces : [];
-  const racks = filteredRacks(spaces, productFilter);
+  let racks = filteredRacks(spaces, productFilter);
+  const preferredRack = options.preferredRack || selectedRack;
+  const preferredRackExists = spaces.some((space) => space.rack === preferredRack);
+  if (options.keepRack && preferredRack && preferredRackExists) {
+    selectedRack = preferredRack;
+    if (!racks.includes(preferredRack)) {
+      racks = [...racks, preferredRack].sort((a, b) => String(a).localeCompare(String(b), undefined, { numeric: true }));
+    }
+  }
   if (!racks.includes(selectedRack)) selectedRack = racks[0] || "";
   const rackSpaces = spaces.filter((space) => space.rack === selectedRack);
   const editable = can(ctx.user, "inventory:adjust");
@@ -88,6 +96,17 @@ function renderPage(ctx) {
   `;
 
   bindPageEvents(ctx, racks, editable);
+  restoreRackView(options);
+}
+
+function restoreRackView(options) {
+  if (!options.updatedLocationId && !Number.isFinite(options.scrollTop)) return;
+  window.requestAnimationFrame(() => {
+    if (Number.isFinite(options.scrollTop)) window.scrollTo({ top: options.scrollTop, behavior: "auto" });
+    const updatedCard = Array.from(document.querySelectorAll("[data-location-id]"))
+      .find((card) => card.dataset.locationId === options.updatedLocationId);
+    if (updatedCard) updatedCard.classList.add("rack-space-updated");
+  });
 }
 
 function filteredRacks(spaces, query) {
@@ -267,12 +286,20 @@ async function submitEditor(event, ctx, space) {
   }
   button.disabled = true;
   button.textContent = "Saving…";
+  const rackBeforeSave = space.rack || selectedRack;
+  const scrollBeforeSave = window.scrollY;
   try {
     const result = await saveRackInventory(ctx.user, input);
     inventoryData = result.rack_inventory || await getRackInventory();
     closeEditor();
     notice(result.changed === false ? "Inventory already matches that amount." : `${space.location_id} inventory updated.`);
-    renderPage(ctx);
+    selectedRack = rackBeforeSave;
+    renderPage(ctx, {
+      keepRack: true,
+      preferredRack: rackBeforeSave,
+      updatedLocationId: space.location_id,
+      scrollTop: scrollBeforeSave
+    });
   } catch (error) {
     notice(error.message);
     button.disabled = false;
