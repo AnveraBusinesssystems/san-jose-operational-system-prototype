@@ -1,5 +1,5 @@
 const SPREADSHEET_ID = "1XYaMXKGR5EG8VS38PPiHFNbtmwX5Ae6N33jLE72nxKE";
-const BACKEND_VERSION = "sales-orders-delivery-v1-2026-07-14";
+const BACKEND_VERSION = "sales-order-speed-v4-2026-07-16";
 
 
 const ROLES = {
@@ -99,6 +99,7 @@ function handleApiRequest_(action, payloadText, callback) {
       salesOrderAction,
       deliverSalesOrder,
       receiveProduct,
+      recommendPutawayLocations,
       sendProduct,
       recordInventoryMovement,
       recordAmazonOutbound,
@@ -144,7 +145,10 @@ function tableMeta_(sheetName) {
   const values = sheet.getDataRange().getValues();
   const headerIndex = values.findIndex((row) => row.some((cell) => String(cell || "").trim().endsWith("_id")));
   if (headerIndex < 0) throw new Error("Could not find header row for " + sheetName);
-  const headers = values[headerIndex].map((cell) => String(cell || "").trim()).filter(Boolean);
+  const rawHeaders = values[headerIndex].map((cell) => String(cell || "").trim());
+  let lastHeaderIndex = rawHeaders.length - 1;
+  while (lastHeaderIndex >= 0 && !rawHeaders[lastHeaderIndex]) lastHeaderIndex -= 1;
+  const headers = rawHeaders.slice(0, lastHeaderIndex + 1);
   return { sheet, values, headerRow: headerIndex + 1, headers };
 }
 
@@ -155,16 +159,45 @@ function readTable_(sheetName) {
     .filter((row) => row.some((cell) => cell !== "" && cell !== null))
     .map((row) => {
       const record = {};
-      meta.headers.forEach((header, index) => record[header] = row[index]);
+      meta.headers.forEach((header, index) => {
+        if (header) record[header] = row[index];
+      });
       return record;
     });
 }
 
 
 function appendRecord_(sheetName, record) {
-  ensureTableColumns_(sheetName, Object.keys(record || {}));
+  return appendRecords_(sheetName, [record]);
+}
+
+
+function appendRecords_(sheetName, records) {
+  records = (records || []).filter(Boolean);
+  if (!records.length) return null;
+  const requiredHeaders = Array.from(new Set(records.reduce((all, record) => all.concat(Object.keys(record || {})), [])));
+  ensureTableColumns_(sheetName, requiredHeaders);
   const meta = tableMeta_(sheetName);
-  meta.sheet.appendRow(meta.headers.map((header) => record[header] !== undefined ? record[header] : ""));
+  const startRow = Math.max(meta.headerRow + 1, meta.sheet.getLastRow() + 1);
+  const values = records.map((record) => meta.headers.map((header) => header && record[header] !== undefined ? record[header] : ""));
+  const requiredLastRow = startRow + values.length - 1;
+  if (requiredLastRow > meta.sheet.getMaxRows()) {
+    meta.sheet.insertRowsAfter(meta.sheet.getMaxRows(), requiredLastRow - meta.sheet.getMaxRows());
+  }
+  meta.sheet.getRange(startRow, 1, values.length, meta.headers.length).setValues(values);
+  return { sheetName, startRow, rowCount: values.length, columnCount: meta.headers.length };
+}
+
+
+function rollbackAppendedRange_(writeInfo) {
+  if (!writeInfo || !writeInfo.rowCount) return;
+  try {
+    sheet_(writeInfo.sheetName)
+      .getRange(writeInfo.startRow, 1, writeInfo.rowCount, writeInfo.columnCount)
+      .clearContent();
+  } catch (_error) {
+    // Best-effort rollback. The original operation error is more useful to the caller.
+  }
 }
 
 
@@ -232,6 +265,51 @@ function number_(value, fallback) {
 
 function today_() {
   return new Date();
+}
+
+
+function isTruthy_(value) {
+  return value === true || String(value || "").trim().toUpperCase() === "TRUE" || String(value || "").trim() === "1";
+}
+
+
+function approximatelyEqual_(a, b, tolerance) {
+  return Math.abs(number_(a, 0) - number_(b, 0)) <= (tolerance || 0.0001);
+}
+
+
+function normalizePurchaseOrderStatus_(status) {
+  const value = String(status || "DRAFT").trim().toUpperCase().replace(/[\s-]+/g, "_");
+  const aliases = {
+    MARKSENT: "SENT",
+    MARK_SENT: "SENT",
+    SEND: "SENT",
+    ORDER: "CONFIRMED",
+    ORDERED: "CONFIRMED",
+    OPEN: "CONFIRMED",
+    PARTIAL: "PARTIALLY_RECEIVED",
+    PARTIALLY_RECEIVED: "PARTIALLY_RECEIVED",
+    RECEIVED: "COMPLETE",
+    COMPLETED: "COMPLETE",
+    CLOSED: "COMPLETE",
+    CLOSE: "COMPLETE"
+  };
+  const normalized = aliases[value] || value;
+  const allowed = ["DRAFT", "CREATED", "SENT", "CONFIRMED", "IN_TRANSIT", "PARTIALLY_RECEIVED", "COMPLETE", "CANCELLED"];
+  return allowed.indexOf(normalized) >= 0 ? normalized : normalized;
+}
+
+
+function purchaseOrderStatusForApi_(status) {
+  const normalized = normalizePurchaseOrderStatus_(status);
+  // The current receiving frontend recognizes ORDERED. Keep that API alias while
+  // storing the Sheet-compatible CONFIRMED value in PURCHASE_ORDERS.
+  return normalized === "CONFIRMED" ? "ORDERED" : normalized;
+}
+
+
+function purchaseOrderForApi_(po) {
+  return po ? { ...po, po_status: purchaseOrderStatusForApi_(po.po_status) } : po;
 }
 
 
@@ -446,14 +524,29 @@ function createSupplier(payload) {
 
 
 function listLocations() {
-  return readTable_("LOCATIONS").filter(isActiveRecord_);
+  const usage = currentLocationUsage_();
+  return readTable_("LOCATIONS").filter(isActiveRecord_).map((location) => {
+    const occupied = usage[String(location.location_id || "")] || { units: 0, weight: 0, lot_ids: [] };
+    const capacityUnits = Math.max(1, number_(location.capacity_units, 1));
+    const hardBlock = locationHardBlockReason_(location);
+    return {
+      ...location,
+      occupied_units: occupied.units,
+      occupied_weight_lbs: occupied.weight,
+      occupied_lot_ids: occupied.lot_ids,
+      available_capacity_units: Math.max(0, capacityUnits - occupied.units),
+      is_occupied: occupied.units > 0,
+      is_receivable: !hardBlock && occupied.units < capacityUnits,
+      availability_reason: hardBlock || (occupied.units >= capacityUnits ? "LOCATION_FULL" : "AVAILABLE")
+    };
+  });
 }
 
 
 function listPurchaseOrders() {
   const suppliers = byId_(readTable_("SUPPLIERS"), "supplier_id");
   return readTable_("PURCHASE_ORDERS").map((po) => ({
-    ...po,
+    ...purchaseOrderForApi_(po),
     supplier: suppliers[po.supplier_id] || null
   })).sort((a, b) => String(b.order_date || "").localeCompare(String(a.order_date || "")));
 }
@@ -468,7 +561,7 @@ function getPurchaseOrderDetail(payload) {
   const lines = readTable_("PURCHASE_ORDER_LINES")
     .filter((line) => String(line.po_id) === poId)
     .map((line) => ({ ...line, product: products[line.product_id] || null }));
-  return { po: { ...po, supplier: suppliers[po.supplier_id] || null }, lines };
+  return { po: { ...purchaseOrderForApi_(po), supplier: suppliers[po.supplier_id] || null }, lines };
 }
 
 
@@ -494,7 +587,7 @@ function createPurchaseOrder(payload) {
   const tax = taxEnabled ? subtotal * taxRate / 100 : 0;
   const po = {
     po_id: poId,
-    po_status: input.po_status || "DRAFT",
+    po_status: normalizePurchaseOrderStatus_(input.po_status || "DRAFT"),
     supplier_id: supplierId,
     created_by: user.user_id || user.role,
     order_date: input.order_date || today_(),
@@ -561,7 +654,7 @@ function updatePurchaseOrder_(payload) {
     const detail = getPurchaseOrderDetail({ po_id: poId });
     if (!detail) throw new Error("Purchase Order was not found.");
     const currentStatus = String(detail.po.po_status || "DRAFT").toUpperCase();
-    if (!["DRAFT", "SENT", "ORDERED", "IN_TRANSIT", "OPEN"].includes(currentStatus)) {
+    if (!["DRAFT", "CREATED", "SENT", "ORDERED", "CONFIRMED", "IN_TRANSIT", "OPEN"].includes(currentStatus)) {
       throw new Error("This Purchase Order cannot be edited in " + currentStatus + " status.");
     }
     const receivingStarted = detail.lines.some((line) => number_(line.qty_received_total, 0) > 0.0001)
@@ -658,17 +751,40 @@ function purchaseOrderAction(payload) {
   payload = payload || {};
   const user = payload.user || {};
   requirePermission_(user, "purchaseOrders:actions");
-  const poId = payload.poId || payload.po_id;
-  const action = String(payload.action || payload.status || "").toUpperCase();
+  const poId = String(payload.poId || payload.po_id || "").trim();
+  const action = String(payload.action || payload.status || "").trim().toUpperCase();
   if (action === "UPDATE" || action === "EDIT") return updatePurchaseOrder_(payload);
-  const statusMap = { SEND: "SENT", SENT: "SENT", ORDER: "ORDERED", ORDERED: "ORDERED", CANCEL: "CANCELLED", CANCELLED: "CANCELLED", CLOSE: "CLOSED", CLOSED: "CLOSED" };
-  const nextStatus = statusMap[action] || action;
-  if (!poId || !nextStatus) throw new Error("Choose a purchase order action.");
-  updateTableRecord_("PURCHASE_ORDERS", "po_id", poId, { po_status: nextStatus, updated_at: today_() });
-  writeAuditLog_({ user_id: user.user_id, role: user.role, action_type: "PO_" + nextStatus, table_name: "PURCHASE_ORDERS", record_id: poId });
-  return getPurchaseOrderDetail({ po_id: poId });
-}
+  if (!poId || !action) throw new Error("Choose a purchase order action.");
 
+  const actionMap = {
+    SEND: "SENT",
+    SENT: "SENT",
+    MARKSENT: "SENT",
+    MARK_SENT: "SENT",
+    ORDER: "CONFIRMED",
+    ORDERED: "CONFIRMED",
+    CONFIRM: "CONFIRMED",
+    CONFIRMED: "CONFIRMED",
+    TRANSIT: "IN_TRANSIT",
+    IN_TRANSIT: "IN_TRANSIT",
+    CANCEL: "CANCELLED",
+    CANCELLED: "CANCELLED",
+    CLOSE: "COMPLETE",
+    CLOSED: "COMPLETE",
+    COMPLETE: "COMPLETE"
+  };
+  const nextStatus = normalizePurchaseOrderStatus_(actionMap[action] || action);
+  const allowed = ["DRAFT", "CREATED", "SENT", "CONFIRMED", "IN_TRANSIT", "PARTIALLY_RECEIVED", "COMPLETE", "CANCELLED"];
+  if (allowed.indexOf(nextStatus) < 0) throw new Error("Unsupported Purchase Order status: " + action);
+
+  return withScriptLock_(function () {
+    const current = readTable_("PURCHASE_ORDERS").find((row) => String(row.po_id) === poId);
+    if (!current) throw new Error("Purchase Order was not found.");
+    updateTableRecord_("PURCHASE_ORDERS", "po_id", poId, { po_status: nextStatus, updated_at: today_() });
+    writeAuditLog_({ user_id: user.user_id, role: user.role, action_type: "PO_" + nextStatus, table_name: "PURCHASE_ORDERS", record_id: poId, old_value: current.po_status || "", new_value: nextStatus });
+    return getPurchaseOrderDetail({ po_id: poId });
+  });
+}
 
 function generatePurchaseOrderTemplate(payload) {
   const detail = getPurchaseOrderDetail(payload);
@@ -682,122 +798,507 @@ function receiveProduct(payload) {
   const user = payload.user || {};
   requirePermission_(user, "receiving:create");
   const input = payload.input || payload;
-  const poLineId = String(input.po_line_id || "").trim();
-  if (!poLineId) throw new Error("Choose a PO line.");
-  const lines = readTable_("PURCHASE_ORDER_LINES");
-  const line = lines.find((row) => String(row.po_line_id) === poLineId);
-  if (!line) throw new Error("PO line was not found.");
-  const qtyReceived = number_(input.qty_received, 0);
-  const qtyDamaged = number_(input.qty_damaged, 0);
-  const qtyAccepted = Math.max(qtyReceived - qtyDamaged, 0);
-  if (qtyReceived <= 0 || qtyAccepted <= 0) throw new Error("Received quantity must be greater than zero.");
-  const unitsPer = number_(line.units_per_purchase_unit || line.case_weight_lbs, 1);
-  const acceptedBase = qtyAccepted * unitsPer;
-  const lotId = nextId_("LOTS", "internal_lot_id", "LOT");
-  const receivingId = nextId_("RECEIVING", "receiving_id", "RCV");
-  const locationId = input.confirmed_location_id || input.location_id || "";
-  const lot = {
-    internal_lot_id: lotId,
-    product_id: line.product_id,
-    supplier_id: line.supplier_id,
-    supplier_lot_number: input.supplier_lot_number || "",
-    po_id: line.po_id,
-    po_line_id: poLineId,
-    received_date: today_(),
-    original_qty: acceptedBase,
-    current_qty_script: acceptedBase,
-    unit_type: line.base_unit || "LB",
-    unit_cost: line.unit_cost,
-    currency: line.currency || "USD",
-    current_location_id: locationId,
-    status: input.quality_status === "HOLD" ? "HOLD" : "ACTIVE",
-    expiration_date: input.expiration_date || "",
-    qr_value: lotId,
-    label_printed_status: "",
-    created_at: today_(),
-    updated_at: today_(),
-    notes: input.notes || "",
-    purchase_qty_received: qtyAccepted,
-    purchase_unit_type: line.unit_type,
-    pallet_count: number_(input.pallet_count, 0)
-  };
-  const receiving = {
-    receiving_id: receivingId,
-    po_id: line.po_id,
-    po_line_id: poLineId,
-    supplier_id: line.supplier_id,
-    product_id: line.product_id,
-    scan_code: input.scan_code || poLineId,
-    internal_lot_id: lotId,
-    supplier_lot_number: input.supplier_lot_number || "",
-    received_date: today_(),
-    received_by: user.user_id || user.role,
-    qty_received: qtyReceived,
-    qty_damaged: qtyDamaged,
-    qty_accepted: qtyAccepted,
-    unit_type: line.unit_type,
-    quality_score: input.quality_score || "",
-    product_accuracy_score: input.product_accuracy_score || "",
-    over_under_status: "",
-    recommended_location_id: input.recommended_location_id || "",
-    confirmed_location_id: locationId,
-    requires_supervisor_approval: input.quality_status === "HOLD",
-    approval_status: input.quality_status === "HOLD" ? "PENDING" : "APPROVED",
-    notes: input.notes || "",
-    base_unit: line.base_unit || "LB",
-    units_per_purchase_unit: unitsPer,
-    qty_accepted_base: acceptedBase,
-    pallet_count: number_(input.pallet_count, 0),
-    quality_status: input.quality_status || "PASS"
-  };
-  const movement = {
-    movement_id: nextId_("INVENTORY_MOVEMENTS", "movement_id", "MOV"),
-    movement_type: "RECEIVE",
-    timestamp: today_(),
-    user_id: user.user_id || user.role,
-    product_id: line.product_id,
-    internal_lot_id: lotId,
-    qty_change: acceptedBase,
-    unit_type: line.base_unit || "LB",
-    from_location_id: "RECEIVING",
-    to_location_id: locationId,
-    related_po_id: line.po_id,
-    related_receiving_id: receivingId,
-    scan_code: lotId,
-    device_id: input.device_id || "WEB_APP",
-    approval_status: receiving.approval_status,
-    notes: input.notes || ""
-  };
-  appendRecord_("RECEIVING", receiving);
-  appendRecord_("LOTS", lot);
-  appendRecord_("INVENTORY_MOVEMENTS", movement);
-  const prevReceived = number_(line.qty_received_total, 0);
-  const ordered = number_(line.qty_ordered, 0);
-  const newReceived = prevReceived + qtyAccepted;
-  const remaining = Math.max(ordered - newReceived, 0);
-  updateTableRecord_("PURCHASE_ORDER_LINES", "po_line_id", poLineId, {
-    qty_received_total: newReceived,
-    qty_remaining: remaining,
-    line_status: remaining <= 0 ? "RECEIVED" : "PARTIAL"
+
+  return withScriptLock_(function () {
+    ensureTableColumns_("RECEIVING", CORE_SCHEMA.RECEIVING);
+    ensureTableColumns_("LOTS", CORE_SCHEMA.LOTS);
+    ensureTableColumns_("INVENTORY_MOVEMENTS", CORE_SCHEMA.INVENTORY_MOVEMENTS);
+
+    const poLineId = String(input.po_line_id || "").trim();
+    if (!poLineId) throw new Error("Choose a PO line.");
+    const line = readTable_("PURCHASE_ORDER_LINES").find((row) => String(row.po_line_id) === poLineId);
+    if (!line) throw new Error("PO line was not found.");
+    const po = readTable_("PURCHASE_ORDERS").find((row) => String(row.po_id) === String(line.po_id));
+    if (!po) throw new Error("Purchase Order was not found.");
+    const poStatus = normalizePurchaseOrderStatus_(po.po_status);
+    if (["CANCELLED", "COMPLETE"].indexOf(poStatus) >= 0) {
+      throw new Error("This Purchase Order cannot be received in " + poStatus + " status.");
+    }
+
+    const qtyReceived = number_(input.qty_received, 0);
+    const qtyDamaged = number_(input.qty_damaged, 0);
+    const qtyAccepted = Math.max(qtyReceived - qtyDamaged, 0);
+    const qualityStatus = String(input.quality_status || "PASS").trim().toUpperCase();
+    if (qtyReceived <= 0) throw new Error("Received quantity must be greater than zero.");
+    if (qtyDamaged < 0 || qtyDamaged > qtyReceived) throw new Error("Damaged quantity cannot exceed quantity received.");
+    if (["PASS", "HOLD", "REJECTED"].indexOf(qualityStatus) < 0) throw new Error("Choose a valid quality status.");
+    if (qualityStatus === "REJECTED" && qtyAccepted > 0.0001) {
+      throw new Error("A rejected delivery must have all received quantity marked damaged/rejected.");
+    }
+    if (qualityStatus !== "REJECTED" && qtyAccepted <= 0.0001) {
+      throw new Error("Accepted quantity must be greater than zero unless the delivery is rejected.");
+    }
+
+    const products = byId_(readTable_("PRODUCTS"), "product_id");
+    const product = products[line.product_id] || {};
+    const unitsPer = number_(line.units_per_purchase_unit || line.case_weight_lbs || product.units_per_purchase_unit || product.case_weight_lbs, 0);
+    if (qtyAccepted > 0.0001 && unitsPer <= 0) {
+      throw new Error("This PO line has no valid unit weight. Add a unit weight before receiving inventory.");
+    }
+
+    const ordered = number_(line.qty_ordered, 0);
+    const prevReceived = number_(line.qty_received_total, 0);
+    const explicitRemaining = line.qty_remaining !== "" && line.qty_remaining !== null && line.qty_remaining !== undefined;
+    const remainingBefore = Math.max(0, explicitRemaining ? number_(line.qty_remaining, ordered - prevReceived) : ordered - prevReceived);
+    const overAmount = qtyAccepted - remainingBefore;
+    if (overAmount > 0.0001) {
+      const role = normalizeRole_(user.role);
+      if (!isTruthy_(input.allow_over_receipt) || ["ADMIN", "MANAGER"].indexOf(role) < 0) {
+        throw new Error(`Accepted quantity exceeds the remaining PO quantity by ${overAmount}. An Admin or Manager must explicitly approve an over-receipt.`);
+      }
+    }
+
+    const supplierLotNumber = String(input.supplier_lot_number || "").trim();
+    if (qtyAccepted > 0.0001 && !supplierLotNumber) throw new Error("Supplier lot number is required.");
+    const acceptedBase = qtyAccepted * unitsPer;
+    const placements = qtyAccepted > 0.0001
+      ? normalizePalletPlacements_(input, qtyAccepted, unitsPer)
+      : [];
+
+    const locationMap = byId_(readTable_("LOCATIONS"), "location_id");
+    const locationUsage = currentLocationUsage_();
+    const plannedUsage = {};
+    placements.forEach((placement, index) => {
+      validateLocationForPlacement_(placement.confirmed_location_id, {
+        locationMap,
+        locationUsage,
+        plannedUsage,
+        product,
+        baseQty: placement.base_qty,
+        requirePalletRack: placements.length > 1 || number_(input.pallet_count, 0) > 0,
+        placementNumber: index + 1
+      });
+      if (!plannedUsage[placement.confirmed_location_id]) plannedUsage[placement.confirmed_location_id] = { units: 0, weight: 0 };
+      plannedUsage[placement.confirmed_location_id].units += 1;
+      plannedUsage[placement.confirmed_location_id].weight += placement.base_qty;
+    });
+
+    const receivingCount = Math.max(1, placements.length);
+    const receivingIds = nextIdBatch_("RECEIVING", "receiving_id", "RCV", receivingCount);
+    const lotIds = nextIdBatch_("LOTS", "internal_lot_id", "LOT", placements.length);
+    const movementIds = nextIdBatch_("INVENTORY_MOVEMENTS", "movement_id", "MOV", placements.length);
+    const receivedAt = today_();
+    const requiresSupervisor = qualityStatus !== "PASS";
+    const approvalStatus = requiresSupervisor ? "PENDING" : "APPROVED";
+    const overUnderStatus = overAmount > 0.0001 ? "OVER" : qtyAccepted < remainingBefore - 0.0001 ? "UNDER" : "MATCH";
+    const receivings = [];
+    const lots = [];
+    const movements = [];
+
+    if (!placements.length) {
+      receivings.push({
+        receiving_id: receivingIds[0],
+        po_id: line.po_id,
+        po_line_id: poLineId,
+        supplier_id: line.supplier_id,
+        product_id: line.product_id,
+        scan_code: input.scan_code || poLineId,
+        internal_lot_id: "",
+        supplier_lot_number: supplierLotNumber,
+        received_date: receivedAt,
+        received_by: user.user_id || user.role,
+        qty_received: qtyReceived,
+        qty_damaged: qtyDamaged,
+        qty_accepted: 0,
+        unit_type: line.unit_type,
+        quality_score: input.quality_score || "",
+        product_accuracy_score: input.product_accuracy_score || "",
+        over_under_status: "UNDER",
+        recommended_location_id: "",
+        confirmed_location_id: "",
+        requires_supervisor_approval: true,
+        approval_status: "PENDING",
+        notes: input.notes || "",
+        base_unit: line.base_unit || product.base_unit || "LB",
+        units_per_purchase_unit: unitsPer,
+        qty_accepted_base: 0,
+        pallet_count: 0,
+        quality_status: qualityStatus
+      });
+    } else {
+      placements.forEach((placement, index) => {
+        const receivingId = receivingIds[index];
+        const lotId = lotIds[index];
+        const movementId = movementIds[index];
+        const palletCountValue = placements.length > 1 ? 1 : number_(input.pallet_count, 0);
+        const damagedOnThisRow = index === 0 ? qtyDamaged : 0;
+        const receivedOnThisRow = placement.purchase_qty + damagedOnThisRow;
+        const recommendedLocation = placement.recommended_location_id || placement.confirmed_location_id;
+        const notes = buildPlacementNotes_(input.notes, index + 1, placements.length, recommendedLocation, placement.confirmed_location_id);
+
+        const lot = {
+          internal_lot_id: lotId,
+          product_id: line.product_id,
+          supplier_id: line.supplier_id,
+          supplier_lot_number: supplierLotNumber,
+          po_id: line.po_id,
+          po_line_id: poLineId,
+          received_date: receivedAt,
+          original_qty: placement.base_qty,
+          current_qty_script: placement.base_qty,
+          unit_type: line.base_unit || product.base_unit || "LB",
+          unit_cost: line.unit_cost,
+          currency: line.currency || "USD",
+          current_location_id: placement.confirmed_location_id,
+          status: qualityStatus === "HOLD" ? "HOLD" : "ACTIVE",
+          expiration_date: input.expiration_date || "",
+          qr_value: lotId,
+          label_printed_status: "NOT_PRINTED",
+          label_printed_at: "",
+          created_at: receivedAt,
+          updated_at: receivedAt,
+          notes,
+          purchase_qty_received: placement.purchase_qty,
+          purchase_unit_type: line.unit_type,
+          pallet_count: palletCountValue
+        };
+        const receiving = {
+          receiving_id: receivingId,
+          po_id: line.po_id,
+          po_line_id: poLineId,
+          supplier_id: line.supplier_id,
+          product_id: line.product_id,
+          scan_code: input.scan_code || poLineId,
+          internal_lot_id: lotId,
+          supplier_lot_number: supplierLotNumber,
+          received_date: receivedAt,
+          received_by: user.user_id || user.role,
+          qty_received: receivedOnThisRow,
+          qty_damaged: damagedOnThisRow,
+          qty_accepted: placement.purchase_qty,
+          unit_type: line.unit_type,
+          quality_score: input.quality_score || "",
+          product_accuracy_score: input.product_accuracy_score || "",
+          over_under_status: overUnderStatus,
+          recommended_location_id: recommendedLocation,
+          confirmed_location_id: placement.confirmed_location_id,
+          requires_supervisor_approval: requiresSupervisor,
+          approval_status: approvalStatus,
+          notes,
+          base_unit: line.base_unit || product.base_unit || "LB",
+          units_per_purchase_unit: unitsPer,
+          qty_accepted_base: placement.base_qty,
+          pallet_count: palletCountValue,
+          quality_status: qualityStatus
+        };
+        const movement = {
+          movement_id: movementId,
+          movement_type: "RECEIVE",
+          timestamp: receivedAt,
+          user_id: user.user_id || user.role,
+          product_id: line.product_id,
+          internal_lot_id: lotId,
+          package_id: "",
+          qty_change: placement.base_qty,
+          unit_type: line.base_unit || product.base_unit || "LB",
+          from_location_id: "RECEIVING",
+          to_location_id: placement.confirmed_location_id,
+          related_po_id: line.po_id,
+          related_receiving_id: receivingId,
+          related_sales_order_id: "",
+          related_pick_task_id: "",
+          related_amazon_order_id: "",
+          scan_code: lotId,
+          device_id: input.device_id || "WEB_APP",
+          approval_status: approvalStatus,
+          notes
+        };
+        receivings.push(receiving);
+        lots.push(lot);
+        movements.push(movement);
+      });
+    }
+
+    const originalLineState = {
+      qty_received_total: line.qty_received_total,
+      qty_remaining: line.qty_remaining,
+      line_status: line.line_status
+    };
+    const originalPoState = {
+      po_status: po.po_status,
+      actual_first_received_date: po.actual_first_received_date,
+      actual_completed_date: po.actual_completed_date,
+      updated_at: po.updated_at
+    };
+    const writes = [];
+    let lineWasUpdated = false;
+    let poWasUpdated = false;
+
+    try {
+      writes.push(appendRecords_("RECEIVING", receivings));
+      if (lots.length) writes.push(appendRecords_("LOTS", lots));
+      if (movements.length) writes.push(appendRecords_("INVENTORY_MOVEMENTS", movements));
+
+      if (qtyAccepted > 0.0001) {
+        const newReceived = prevReceived + qtyAccepted;
+        const remaining = Math.max(ordered - newReceived, 0);
+        lineWasUpdated = true;
+        updateTableRecord_("PURCHASE_ORDER_LINES", "po_line_id", poLineId, {
+          qty_received_total: newReceived,
+          qty_remaining: remaining,
+          line_status: remaining <= 0.0001 ? "RECEIVED" : "PARTIAL"
+        });
+        poWasUpdated = true;
+        refreshPurchaseOrderStatus_(line.po_id);
+      }
+    } catch (error) {
+      if (poWasUpdated) {
+        try { updateTableRecord_("PURCHASE_ORDERS", "po_id", line.po_id, originalPoState); } catch (_rollbackError) {}
+      }
+      if (lineWasUpdated) {
+        try { updateTableRecord_("PURCHASE_ORDER_LINES", "po_line_id", poLineId, originalLineState); } catch (_rollbackError) {}
+      }
+      writes.reverse().forEach(rollbackAppendedRange_);
+      throw error;
+    }
+
+    writeAuditLog_({
+      user_id: user.user_id,
+      role: user.role,
+      action_type: placements.length > 1 ? "RECEIVE_PRODUCT_MULTI_PALLET" : qualityStatus === "REJECTED" ? "REJECT_DELIVERY" : "RECEIVE_PRODUCT",
+      table_name: "RECEIVING",
+      record_id: receivings[0].receiving_id,
+      notes: `${receivings.length} receiving row(s); ${lots.length} inventory lot(s); accepted ${qtyAccepted} ${line.unit_type || "units"}.`
+    });
+
+    return {
+      receiving: receivings[0],
+      lot: lots[0] || { internal_lot_id: "", current_location_id: "", status: "REJECTED" },
+      movement: movements[0] || null,
+      receivings,
+      lots,
+      movements,
+      multi_pallet: lots.length > 1,
+      rejected: qualityStatus === "REJECTED",
+      purchaseOrder: getPurchaseOrderDetail({ po_id: line.po_id })
+    };
   });
-  refreshPurchaseOrderStatus_(line.po_id);
-  writeAuditLog_({ user_id: user.user_id, role: user.role, action_type: "RECEIVE_PRODUCT", table_name: "RECEIVING", record_id: receivingId });
-  return { receiving, lot, movement, purchaseOrder: getPurchaseOrderDetail({ po_id: line.po_id }) };
+}
+
+
+function normalizePalletPlacements_(input, qtyAccepted, unitsPer) {
+  const source = Array.isArray(input.pallet_placements) ? input.pallet_placements : [];
+  if (!source.length) {
+    const declaredCount = Math.max(0, Math.floor(number_(input.pallet_count, 0)));
+    if (declaredCount > 1) {
+      throw new Error("Multiple pallets require a separate quantity and confirmed location for each pallet.");
+    }
+    const locationId = String(input.confirmed_location_id || input.location_id || "").trim();
+    if (!locationId) throw new Error("Confirmed location is required for accepted inventory.");
+    return [{
+      pallet_number: 1,
+      purchase_qty: qtyAccepted,
+      base_qty: qtyAccepted * unitsPer,
+      recommended_location_id: String(input.recommended_location_id || locationId).trim(),
+      confirmed_location_id: locationId
+    }];
+  }
+
+  const declaredCount = number_(input.pallet_count, source.length);
+  if (declaredCount > 0 && declaredCount !== source.length) {
+    throw new Error(`Pallet count (${declaredCount}) does not match the ${source.length} pallet placements provided.`);
+  }
+  const seenLocations = {};
+  const placements = source.map((placement, index) => {
+    const purchaseQty = number_(placement.purchase_qty !== undefined ? placement.purchase_qty : placement.qty_accepted !== undefined ? placement.qty_accepted : placement.qty_received !== undefined ? placement.qty_received : placement.quantity, 0);
+    if (purchaseQty <= 0) throw new Error(`Pallet ${index + 1} quantity must be greater than zero.`);
+    const expectedBase = purchaseQty * unitsPer;
+    const suppliedBase = placement.base_qty !== undefined && placement.base_qty !== "" ? number_(placement.base_qty, 0) : expectedBase;
+    if (!approximatelyEqual_(suppliedBase, expectedBase, 0.01)) {
+      throw new Error(`Pallet ${index + 1} base quantity does not match its purchase quantity and unit weight.`);
+    }
+    const confirmedLocation = String(placement.confirmed_location_id || placement.location_id || "").trim();
+    if (!confirmedLocation) throw new Error(`Pallet ${index + 1} requires a confirmed location.`);
+    if (seenLocations[confirmedLocation]) throw new Error(`Location ${confirmedLocation} was selected for more than one pallet.`);
+    seenLocations[confirmedLocation] = true;
+    return {
+      pallet_number: number_(placement.pallet_number, index + 1),
+      purchase_qty: purchaseQty,
+      base_qty: expectedBase,
+      recommended_location_id: String(placement.recommended_location_id || confirmedLocation).trim(),
+      confirmed_location_id: confirmedLocation
+    };
+  });
+  const totalPurchaseQty = placements.reduce((sum, placement) => sum + placement.purchase_qty, 0);
+  if (!approximatelyEqual_(totalPurchaseQty, qtyAccepted, 0.01)) {
+    throw new Error(`Pallet quantities total ${totalPurchaseQty}, but accepted quantity is ${qtyAccepted}.`);
+  }
+  return placements;
+}
+
+
+function buildPlacementNotes_(baseNotes, palletNumber, palletTotal, recommendedLocation, confirmedLocation) {
+  const parts = [];
+  if (palletTotal > 1) parts.push(`Pallet ${palletNumber} of ${palletTotal}.`);
+  if (recommendedLocation && confirmedLocation && recommendedLocation !== confirmedLocation) {
+    parts.push(`Location override: recommended ${recommendedLocation}; confirmed ${confirmedLocation}.`);
+  }
+  if (String(baseNotes || "").trim()) parts.push(String(baseNotes).trim());
+  return parts.join(" ");
+}
+
+
+function currentLocationUsage_() {
+  const result = {};
+  readTable_("LOTS").forEach((lot) => {
+    const locationId = String(lot.current_location_id || "").trim();
+    const qty = number_(lot.current_qty_script !== "" && lot.current_qty_script !== undefined ? lot.current_qty_script : lot.original_qty, 0);
+    const status = String(lot.status || "ACTIVE").trim().toUpperCase();
+    if (!locationId || qty <= 0.0001 || ["EMPTY", "DEPLETED", "RETURNED"].indexOf(status) >= 0) return;
+    if (!result[locationId]) result[locationId] = { units: 0, weight: 0, lot_ids: [] };
+    result[locationId].units += Math.max(1, number_(lot.pallet_count, 1));
+    result[locationId].weight += qty;
+    result[locationId].lot_ids.push(lot.internal_lot_id);
+  });
+  return result;
+}
+
+
+function locationHardBlockReason_(location) {
+  if (!location || !location.location_id) return "LOCATION_NOT_FOUND";
+  if (!isActiveRecord_(location)) return "LOCATION_INACTIVE";
+  const status = String(location.current_status || "AVAILABLE").trim().toUpperCase();
+  const blocked = ["BLOCKED", "UNAVAILABLE", "OUT_OF_SERVICE", "MAINTENANCE", "INACTIVE"];
+  return blocked.indexOf(status) >= 0 ? "LOCATION_" + status : "";
+}
+
+
+function locationAllowsProduct_(location, product) {
+  const raw = String(location.allowed_categories || "").trim();
+  if (!raw) return true;
+  const allowed = raw.split(/[,;|]/).map((value) => value.trim().toUpperCase()).filter(Boolean);
+  if (!allowed.length || allowed.some((value) => ["ALL", "GENERAL", "ANY", "*"].indexOf(value) >= 0)) return true;
+  const category = String((product || {}).product_category || "").trim().toUpperCase();
+  return Boolean(category) && allowed.indexOf(category) >= 0;
+}
+
+
+function validateLocationForPlacement_(locationId, context) {
+  const location = context.locationMap[locationId];
+  const label = context.placementNumber ? `Pallet ${context.placementNumber}: ` : "";
+  const hardBlock = locationHardBlockReason_(location);
+  if (hardBlock) throw new Error(label + `location ${locationId} is unavailable (${hardBlock}).`);
+  const type = String(location.location_type || "").trim().toUpperCase();
+  if (context.requirePalletRack && type && type !== "PALLET_RACK") {
+    throw new Error(label + `location ${locationId} is ${type}, not a pallet rack.`);
+  }
+  if (!locationAllowsProduct_(location, context.product)) {
+    throw new Error(label + `location ${locationId} does not allow product category ${(context.product || {}).product_category || "UNKNOWN"}.`);
+  }
+  const current = context.locationUsage[locationId] || { units: 0, weight: 0 };
+  const planned = context.plannedUsage[locationId] || { units: 0, weight: 0 };
+  const capacityUnits = Math.max(1, number_(location.capacity_units, 1));
+  if (current.units + planned.units + 1 > capacityUnits) {
+    throw new Error(label + `location ${locationId} is already full.`);
+  }
+  const capacityWeight = number_(location.capacity_weight_lbs, 0);
+  if (capacityWeight > 0 && current.weight + planned.weight + number_(context.baseQty, 0) > capacityWeight + 0.01) {
+    throw new Error(label + `location ${locationId} would exceed its weight capacity.`);
+  }
+  return location;
+}
+
+
+function recommendPutawayLocations(payload) {
+  payload = payload || {};
+  const user = payload.user || {};
+  requirePermission_(user, "receiving:create");
+  const input = payload.input || payload;
+  const poLineId = String(input.po_line_id || "").trim();
+  const line = poLineId ? readTable_("PURCHASE_ORDER_LINES").find((row) => String(row.po_line_id) === poLineId) : null;
+  const products = byId_(readTable_("PRODUCTS"), "product_id");
+  const product = products[input.product_id || (line || {}).product_id] || {};
+  if (!product.product_id) throw new Error("Choose a valid PO line or product before requesting locations.");
+  const unitsPer = number_((line || {}).units_per_purchase_unit || (line || {}).case_weight_lbs || product.units_per_purchase_unit || product.case_weight_lbs, 0);
+  const palletCount = Math.max(1, Math.floor(number_(input.pallet_count, 1)));
+  const acceptedQty = number_(input.qty_accepted !== undefined ? input.qty_accepted : number_(input.qty_received, 0) - number_(input.qty_damaged, 0), 0);
+  const perPalletBase = unitsPer > 0 && acceptedQty > 0 ? acceptedQty * unitsPer / palletCount : 0;
+  return recommendPutawayLocationsInternal_(product, palletCount, perPalletBase, input.exclude_location_ids || []);
+}
+
+
+function recommendPutawayLocationsInternal_(product, count, baseQtyPerPallet, excludedLocationIds) {
+  const locations = readTable_("LOCATIONS").filter(isActiveRecord_);
+  const locationMap = byId_(locations, "location_id");
+  const usage = currentLocationUsage_();
+  const planned = {};
+  const excluded = {};
+  (excludedLocationIds || []).forEach((id) => excluded[String(id)] = true);
+  const recommendations = [];
+
+  for (let index = 0; index < count; index++) {
+    const candidates = locations.filter((location) => {
+      const id = String(location.location_id || "");
+      if (!id || excluded[id] || recommendations.some((item) => item.location_id === id)) return false;
+      try {
+        validateLocationForPlacement_(id, {
+          locationMap,
+          locationUsage: usage,
+          plannedUsage: planned,
+          product,
+          baseQty: baseQtyPerPallet,
+          requirePalletRack: true,
+          placementNumber: index + 1
+        });
+        return true;
+      } catch (_error) {
+        return false;
+      }
+    }).sort((a, b) => locationRecommendationScore_(a, product) - locationRecommendationScore_(b, product));
+    if (!candidates.length) break;
+    const chosen = candidates[0];
+    const id = String(chosen.location_id);
+    if (!planned[id]) planned[id] = { units: 0, weight: 0 };
+    planned[id].units += 1;
+    planned[id].weight += baseQtyPerPallet;
+    recommendations.push({
+      pallet_number: index + 1,
+      location_id: id,
+      recommended_location_id: id,
+      reason: putawayRecommendationReason_(chosen, product),
+      priority_rank: number_(chosen.priority_rank, 999999),
+      location: chosen
+    });
+  }
+  return { requested_count: count, recommended_count: recommendations.length, recommendations };
+}
+
+
+function locationRecommendationScore_(location, product) {
+  let score = number_(location.priority_rank, 999999) * 100;
+  const preference = String((product || {}).storage_zone_preference || "").trim().toUpperCase();
+  const zoneText = [location.zone, location.notes, location.location_type].map((value) => String(value || "").toUpperCase()).join(" ");
+  if (preference && zoneText.indexOf(preference) >= 0) score -= 100000;
+  const bin = String(location.bin || "").trim().toUpperCase();
+  score += bin === "F" ? 0 : bin === "M" ? 10 : bin === "B" ? 20 : 30;
+  const level = number_(location.level, 99);
+  score += level;
+  return score;
+}
+
+
+function putawayRecommendationReason_(location, product) {
+  const preference = String((product || {}).storage_zone_preference || "").trim();
+  const preferenceMatch = preference && [location.zone, location.notes].some((value) => String(value || "").toUpperCase().indexOf(preference.toUpperCase()) >= 0);
+  return `${preferenceMatch ? "Matches storage preference; " : ""}priority ${location.priority_rank || "default"}; ${location.bin || "standard"} position.`;
 }
 
 
 function refreshPurchaseOrderStatus_(poId) {
   const lines = readTable_("PURCHASE_ORDER_LINES").filter((line) => String(line.po_id) === String(poId));
   if (!lines.length) return;
-  const allReceived = lines.every((line) => number_(line.qty_remaining, number_(line.qty_ordered, 0)) <= 0);
-  const anyReceived = lines.some((line) => number_(line.qty_received_total, 0) > 0);
-  updateTableRecord_("PURCHASE_ORDERS", "po_id", poId, {
-    po_status: allReceived ? "RECEIVED" : anyReceived ? "PARTIALLY_RECEIVED" : "ORDERED",
-    actual_first_received_date: anyReceived ? today_() : "",
-    actual_completed_date: allReceived ? today_() : ""
-  });
+  const po = readTable_("PURCHASE_ORDERS").find((row) => String(row.po_id) === String(poId));
+  if (!po) throw new Error("Purchase Order was not found while refreshing status.");
+  const allReceived = lines.every((line) => number_(line.qty_remaining, number_(line.qty_ordered, 0)) <= 0.0001);
+  const anyReceived = lines.some((line) => number_(line.qty_received_total, 0) > 0.0001);
+  const fields = {
+    po_status: allReceived ? "COMPLETE" : anyReceived ? "PARTIALLY_RECEIVED" : normalizePurchaseOrderStatus_(po.po_status),
+    actual_first_received_date: po.actual_first_received_date || (anyReceived ? today_() : ""),
+    actual_completed_date: allReceived ? (po.actual_completed_date || today_()) : po.actual_completed_date || "",
+    updated_at: today_()
+  };
+  updateTableRecord_("PURCHASE_ORDERS", "po_id", poId, fields);
 }
-
 
 function createOpeningInventory(payload) {
   payload = payload || {};
@@ -1051,11 +1552,31 @@ function createSalesOrder(payload) {
       shipping_address: input.shipping_address || customer.address || ""
     };
 
-    appendRecord_("SALES_ORDERS", order);
-    lines.forEach((line) => appendRecord_("SALES_ORDER_LINES", line));
-    writeAuditLog_({ user_id: user.user_id, role: user.role, action_type: "CREATE_SALES_ORDER", table_name: "SALES_ORDERS", record_id: salesOrderId });
-    const detail = getSalesOrderDetail({ sales_order_id: salesOrderId });
-    return { ...detail.order, lines: detail.lines, pickTasks: detail.pickTasks };
+    // Write the order and every warehouse allocation in two batch operations.
+    // The previous implementation performed one Sheet write per allocation line,
+    // then reread the complete Sales Order detail before returning.
+    const writes = [];
+    try {
+      writes.push(appendRecords_("SALES_ORDERS", [order]));
+      writes.push(appendRecords_("SALES_ORDER_LINES", lines));
+    } catch (error) {
+      writes.reverse().forEach(rollbackAppendedRange_);
+      throw error;
+    }
+
+    writeAuditLog_({
+      user_id: user.user_id,
+      role: user.role,
+      action_type: "CREATE_SALES_ORDER",
+      table_name: "SALES_ORDERS",
+      record_id: salesOrderId,
+      notes: `${lines.length} allocation line(s) written in one batch.`
+    });
+
+    // Preserve the response fields the frontend uses without rereading the
+    // SALES_ORDERS, SALES_ORDER_LINES, SUPPLIERS, PRODUCTS, LOTS, LOCATIONS,
+    // and PICK_TASKS sheets.
+    return { ...order, customer, lines, pickTasks: [] };
   });
 }
 
@@ -1945,7 +2466,7 @@ function getDashboard() {
   const planning = planningRowsV2_(products, suppliers, purchaseOrders, purchaseLines, snapshot, dailyUsageStatsFromMovementsV2_(movements), priceAnalytics);
   const lowStockProducts = planning.filter((row) => ["REORDER", "WATCH"].includes(row.status));
   const expiringLots = expirationRowsV2_(snapshot);
-  const openPo = purchaseOrders.filter((po) => ["DRAFT", "SENT", "ORDERED", "IN_TRANSIT", "PARTIALLY_RECEIVED", "PARTIAL"].includes(String(po.po_status || "").toUpperCase()));
+  const openPo = purchaseOrders.filter((po) => ["DRAFT", "CREATED", "SENT", "CONFIRMED", "ORDERED", "IN_TRANSIT", "PARTIALLY_RECEIVED", "PARTIAL"].includes(String(po.po_status || "").toUpperCase()));
   const openSo = salesOrders.filter((order) => ["DRAFT", "CONFIRMED", "PICKED", "OPEN", "PARTIAL", "PARTIALLY_PICKED"].includes(String(order.status || "").toUpperCase()));
   const occupied = {};
   snapshot.forEach((row) => { if (row.location_id) occupied[row.location_id] = true; });
@@ -2138,14 +2659,44 @@ function validateOperationalSchema() {
     const missingHeaders = CORE_SCHEMA[sheetName].filter((header) => meta.headers.indexOf(header) < 0);
     return { sheet: sheetName, ok: missingHeaders.length === 0, missingSheet: false, headerRow: meta.headerRow, missingHeaders };
   });
+
+  const diagnostics = [];
+  const purchaseOrders = readTable_("PURCHASE_ORDERS");
+  purchaseOrders.forEach((po) => {
+    const raw = String(po.po_status || "").trim().toUpperCase();
+    const normalized = normalizePurchaseOrderStatus_(raw);
+    if (raw && raw !== normalized) diagnostics.push({ severity: "WARNING", type: "LEGACY_PO_STATUS", record_id: po.po_id, current_value: raw, normalized_value: normalized });
+  });
+
+  const usage = currentLocationUsage_();
+  const locations = byId_(readTable_("LOCATIONS"), "location_id");
+  Object.keys(usage).forEach((locationId) => {
+    const location = locations[locationId];
+    const capacity = Math.max(1, number_((location || {}).capacity_units, 1));
+    if (!location) diagnostics.push({ severity: "ERROR", type: "LOT_LOCATION_MISSING", location_id: locationId, lot_ids: usage[locationId].lot_ids });
+    else if (usage[locationId].units > capacity) diagnostics.push({ severity: "ERROR", type: "LOCATION_OVER_CAPACITY", location_id: locationId, occupied_units: usage[locationId].units, capacity_units: capacity, lot_ids: usage[locationId].lot_ids });
+  });
+
+  readTable_("LOTS").forEach((lot) => {
+    const qty = number_(lot.current_qty_script !== "" && lot.current_qty_script !== undefined ? lot.current_qty_script : lot.original_qty, 0);
+    const status = String(lot.status || "ACTIVE").toUpperCase();
+    if (qty > 0.0001 && ["ACTIVE", "AVAILABLE", "HOLD"].indexOf(status) >= 0 && !String(lot.current_location_id || "").trim()) {
+      diagnostics.push({ severity: "ERROR", type: "ACTIVE_LOT_WITHOUT_LOCATION", record_id: lot.internal_lot_id, current_qty: qty });
+    }
+  });
+
+  const schemaOk = results.every((result) => result.ok);
+  const dataIntegrityOk = !diagnostics.some((item) => item.severity === "ERROR");
   return {
     spreadsheetId: spreadsheet_().getId(),
-    ok: results.every((result) => result.ok),
+    ok: schemaOk,
+    schemaOk,
+    dataIntegrityOk,
     checkedAt: today_(),
-    results
+    results,
+    diagnostics
   };
 }
-
 
 function byId_(rows, idColumn) {
   return (rows || []).reduce((map, row) => {
