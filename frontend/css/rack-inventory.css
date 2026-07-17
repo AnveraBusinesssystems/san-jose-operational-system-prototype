@@ -177,6 +177,17 @@
 
 .rack-space em { color: #a33a25; font-size: 11px; font-style: normal; font-weight: 800; }
 
+/* The professional theme makes rack buttons dark green. Keep every label on
+   those cards high-contrast instead of inheriting muted green/red text. */
+.rack-space,
+.rack-space .rack-space-id,
+.rack-space strong,
+.rack-space .rack-space-lot,
+.rack-space .rack-space-quantity,
+.rack-space em {
+  color: #fff !important;
+}
+
 .rack-legend {
   border-top: 1px solid var(--line);
   color: var(--muted);
