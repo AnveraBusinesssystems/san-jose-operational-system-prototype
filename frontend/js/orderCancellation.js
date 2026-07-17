@@ -1,5 +1,5 @@
 import { clearApiCache, getPurchaseOrderDetail, getSalesOrderDetail } from "./api-smooth1.js?v=order-cancel1";
-import { GOOGLE_SCRIPT_WEB_APP_URL } from "./config.js?v=rack-inventory1";
+import { GOOGLE_SCRIPT_WEB_APP_URL } from "./config.js?v=rack-inventory2";
 import { escapeHtml, notice } from "./utils.js?v=login-repair1";
 
 const SALES_REMOVABLE = new Set(["DRAFT", "CONFIRMED"]);

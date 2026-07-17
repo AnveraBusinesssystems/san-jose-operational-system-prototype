@@ -1,6 +1,6 @@
 import * as base from "./api.js?v=rack-inventory1";
 import { createSalesOrderReliable } from "./sales-order-api.js?v=1";
-import { GOOGLE_SCRIPT_WEB_APP_URL } from "./config.js?v=rack-inventory1";
+import { GOOGLE_SCRIPT_WEB_APP_URL } from "./config.js?v=rack-inventory2";
 
 const READ_CACHE_TTL_MS = 45000;
 const readCache = new Map();

@@ -1,4 +1,4 @@
-import { warmOperationalCache } from "./api-smooth1.js?v=rack-inventory1";
+import { warmOperationalCache } from "./api-smooth1.js?v=rack-inventory2";
 import { getSession, signIn, signOut } from "./auth.js?v=rack-inventory1";
 import { renderNavigation, renderRoute, configureRouter, navigate } from "./router.js?v=rack-inventory1";
 import { allowedPages } from "./permissions.js?v=rack-inventory1";

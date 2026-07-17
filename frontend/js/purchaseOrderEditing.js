@@ -1,5 +1,5 @@
 import { clearApiCache, getPurchaseOrderDetail, listProducts, listSuppliers } from "./api-smooth1.js?v=po-edit1";
-import { GOOGLE_SCRIPT_WEB_APP_URL } from "./config.js?v=rack-inventory1";
+import { GOOGLE_SCRIPT_WEB_APP_URL } from "./config.js?v=rack-inventory2";
 import { escapeHtml, notice } from "./utils.js?v=login-repair1";
 
 const EDITABLE = new Set(["DRAFT", "SENT", "ORDERED", "IN_TRANSIT", "OPEN"]);

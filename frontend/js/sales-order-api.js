@@ -1,5 +1,5 @@
 import * as base from "./api.js?v=pin1";
-import { GOOGLE_SCRIPT_WEB_APP_URL } from "./config.js?v=rack-inventory1";
+import { GOOGLE_SCRIPT_WEB_APP_URL } from "./config.js?v=rack-inventory2";
 
 const USES_APPS_SCRIPT = Boolean(GOOGLE_SCRIPT_WEB_APP_URL && GOOGLE_SCRIPT_WEB_APP_URL.includes("/exec"));
 const SALES_ORDER_WRITE_TIMEOUT_MS = 60000;
