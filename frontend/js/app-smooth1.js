@@ -1,4 +1,4 @@
-import { warmOperationalCache } from "./api-smooth1.js?v=rack-inventory2";
+import { warmOperationalCache } from "./api-smooth1.js?v=rack-inventory4";
 import { getSession, signIn, signOut } from "./auth.js?v=rack-inventory1";
 import { renderNavigation, renderRoute, configureRouter, navigate } from "./router.js?v=rack-inventory1";
 import { allowedPages } from "./permissions.js?v=rack-inventory1";
@@ -10,7 +10,7 @@ import * as orders from "../pages/orders.js?v=login-repair1";
 import * as purchaseOrders from "../pages/purchaseOrders.js?v=login-repair1";
 import * as salesOrders from "../pages/salesOrdersProfessional.js?v=login-repair1";
 import * as receiving from "../pages/receiving.js?v=login-repair1";
-import * as inventory from "../pages/inventory.js?v=rack-inventory3";
+import * as inventory from "../pages/inventory.js?v=rack-inventory4";
 import * as scanner from "../pages/scannerTest.js?v=login-repair1";
 import * as amazon from "../pages/amazon.js?v=login-repair1";
 import * as reports from "../pages/reports.js?v=login-repair1";

@@ -6,6 +6,7 @@ const DB_KEY = "sjops.database.v1";
 const APPS_CACHE_PREFIX = "sjops.apps.cache.";
 const APPS_CACHE_TTL_MS = 45000;
 const APPS_REQUEST_TIMEOUT_MS = 15000;
+const RACK_SAVE_TIMEOUT_MS = 60000;
 const APPS_AUTH_TIMEOUT_MS = 6000;
 const READ_ACTIONS = new Set([
   "getDashboard",
@@ -1182,7 +1183,7 @@ export async function getRackInventory() {
 }
 
 export async function saveRackInventory(user, input) {
-  if (useAppsScript()) return callAppsScript("saveRackInventory", { user, input });
+  if (useAppsScript()) return callAppsScript("saveRackInventory", { user, input }, RACK_SAVE_TIMEOUT_MS);
   requirePermission(user, "inventory:adjust");
   const data = await db();
   const locationId = String(input.location_id || "").trim();

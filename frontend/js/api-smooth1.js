@@ -1,4 +1,4 @@
-import * as base from "./api.js?v=rack-inventory1";
+import * as base from "./api.js?v=rack-inventory4";
 import { createSalesOrderReliable } from "./sales-order-api.js?v=1";
 import { GOOGLE_SCRIPT_WEB_APP_URL } from "./config.js?v=rack-inventory2";
 
@@ -27,6 +27,7 @@ export function warmOperationalCache() {
 export function clearApiCache() {
   readCache.clear();
   pendingReads.clear();
+  base.clearApiCache?.();
 }
 
 export const getDashboard = () => cachedRead("getDashboard", [], base.getDashboard);

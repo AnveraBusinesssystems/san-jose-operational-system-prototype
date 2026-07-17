@@ -40,6 +40,7 @@
 .rack-board-panel {
   overflow: hidden;
   padding: 0 !important;
+  scroll-margin-top: 12px;
 }
 
 .rack-board-heading {

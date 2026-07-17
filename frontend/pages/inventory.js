@@ -1,6 +1,6 @@
-import { getRackInventory, listProducts, saveRackInventory } from "../js/api-smooth1.js?v=rack-inventory3";
-import { can } from "../js/permissions.js?v=rack-inventory3";
-import { escapeHtml, formatQuantity, notice } from "../js/utils.js?v=rack-inventory3";
+import { clearApiCache, getRackInventory, listProducts, saveRackInventory } from "../js/api-smooth1.js?v=rack-inventory4";
+import { can } from "../js/permissions.js?v=rack-inventory4";
+import { escapeHtml, formatQuantity, notice } from "../js/utils.js?v=rack-inventory4";
 
 const LEVELS = ["L3", "L2", "L1"];
 const BINS = ["F", "M", "B"];
@@ -100,9 +100,9 @@ function renderPage(ctx, options = {}) {
 }
 
 function restoreRackView(options) {
-  if (!options.updatedLocationId && !Number.isFinite(options.scrollTop)) return;
+  if (!options.updatedLocationId && !options.returnToRack) return;
   window.requestAnimationFrame(() => {
-    if (Number.isFinite(options.scrollTop)) window.scrollTo({ top: options.scrollTop, behavior: "auto" });
+    if (options.returnToRack) document.querySelector(".rack-board-panel")?.scrollIntoView({ block: "start", behavior: "auto" });
     const updatedCard = Array.from(document.querySelectorAll("[data-location-id]"))
       .find((card) => card.dataset.locationId === options.updatedLocationId);
     if (updatedCard) updatedCard.classList.add("rack-space-updated");
@@ -287,24 +287,53 @@ async function submitEditor(event, ctx, space) {
   button.disabled = true;
   button.textContent = "Saving…";
   const rackBeforeSave = space.rack || selectedRack;
-  const scrollBeforeSave = window.scrollY;
   try {
     const result = await saveRackInventory(ctx.user, input);
     inventoryData = result.rack_inventory || await getRackInventory();
-    closeEditor();
-    notice(result.changed === false ? "Inventory already matches that amount." : `${space.location_id} inventory updated.`);
-    selectedRack = rackBeforeSave;
-    renderPage(ctx, {
-      keepRack: true,
-      preferredRack: rackBeforeSave,
-      updatedLocationId: space.location_id,
-      scrollTop: scrollBeforeSave
-    });
+    finishRackSave(ctx, space, rackBeforeSave, result.changed === false);
   } catch (error) {
+    if (isAmbiguousSaveError(error)) {
+      try {
+        clearApiCache();
+        const refreshed = await getRackInventory();
+        if (rackSaveMatches(refreshed, input)) {
+          inventoryData = refreshed;
+          finishRackSave(ctx, space, rackBeforeSave, false);
+          return;
+        }
+      } catch (_verificationError) {
+        // Show the original save error when a follow-up verification also fails.
+      }
+    }
     notice(error.message);
     button.disabled = false;
     button.textContent = space.occupied ? "Save actual amount" : "Add to this space";
   }
+}
+
+function finishRackSave(ctx, space, rack, unchanged) {
+  closeEditor();
+  selectedRack = rack;
+  renderPage(ctx, {
+    keepRack: true,
+    preferredRack: rack,
+    updatedLocationId: space.location_id,
+    returnToRack: true
+  });
+  notice(unchanged ? "Inventory already matches that amount." : `${space.location_id} inventory updated.`);
+}
+
+function isAmbiguousSaveError(error) {
+  return /timed out|could not reach/i.test(String(error?.message || ""));
+}
+
+function rackSaveMatches(data, input) {
+  const updated = data?.spaces?.find((item) => item.location_id === input.location_id);
+  if (!updated) return false;
+  const requestedUnits = Number(input.purchase_units);
+  if (!Number.isFinite(requestedUnits) || Math.abs(Number(updated.current_purchase_units || 0) - requestedUnits) > 0.011) return false;
+  if (requestedUnits <= 0) return !updated.occupied;
+  return updated.occupied && (!input.product_id || updated.product_id === input.product_id);
 }
 
 function findProduct(name) {
