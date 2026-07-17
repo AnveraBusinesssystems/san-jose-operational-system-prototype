@@ -1,5 +1,5 @@
 const SPREADSHEET_ID = "1XYaMXKGR5EG8VS38PPiHFNbtmwX5Ae6N33jLE72nxKE";
-const BACKEND_VERSION = "rack-inventory-v1-2026-07-17";
+const BACKEND_VERSION = "rack-inventory-v2-2026-07-17";
 
 
 const ROLES = {
@@ -1164,6 +1164,30 @@ function locationHardBlockReason_(location) {
 }
 
 
+function syncLocationInventoryStatus_(locationId) {
+  locationId = String(locationId || "").trim();
+  if (!locationId) return "";
+
+  const location = readTable_("LOCATIONS").find((row) => String(row.location_id || "").trim() === locationId);
+  if (!location) return "";
+  const currentStatus = String(location.current_status || "AVAILABLE").trim().toUpperCase();
+  const inventoryManagedStatuses = ["", "AVAILABLE", "UNAVAILABLE", "OCCUPIED", "EMPTY"];
+  if (inventoryManagedStatuses.indexOf(currentStatus) < 0) return currentStatus;
+
+  const occupied = readTable_("LOTS").some((lot) => {
+    if (String(lot.current_location_id || "").trim() !== locationId) return false;
+    const qty = number_(lot.current_qty_script !== "" && lot.current_qty_script !== undefined ? lot.current_qty_script : lot.original_qty, 0);
+    const lotStatus = String(lot.status || "ACTIVE").trim().toUpperCase();
+    return qty > 0.0001 && ["EMPTY", "DEPLETED", "RETURNED"].indexOf(lotStatus) < 0;
+  });
+  const nextStatus = occupied ? "UNAVAILABLE" : "AVAILABLE";
+  if (currentStatus !== nextStatus) {
+    updateTableRecord_("LOCATIONS", "location_id", locationId, { current_status: nextStatus });
+  }
+  return nextStatus;
+}
+
+
 function locationAllowsProduct_(location, product) {
   const raw = String(location.allowed_categories || "").trim();
   if (!raw) return true;
@@ -1839,6 +1863,7 @@ function recordInventoryMovementInternal_(user, input) {
     status: nextQty <= 0.0001 ? "EMPTY" : (String(lot.status || "ACTIVE").toUpperCase() === "EMPTY" ? "ACTIVE" : lot.status || "ACTIVE"),
     updated_at: today_()
   });
+  syncLocationInventoryStatus_(lot.current_location_id);
 
   const movement = {
     movement_id: nextId_("INVENTORY_MOVEMENTS", "movement_id", "MOV"),
@@ -1995,6 +2020,8 @@ function getRackInventory() {
     const unitWeight = lot ? lotUnitWeightV2_(lot) : 0;
     const reservationKey = lot ? [lot.product_id, lot.internal_lot_id, locationId].join("|") : "";
     const reservedQty = reservationKey ? number_(reserved[reservationKey], 0) : 0;
+    const rawLocationStatus = String(location.current_status || "AVAILABLE").trim().toUpperCase();
+    const staleOccupiedStatus = !current && ["UNAVAILABLE", "OCCUPIED"].indexOf(rawLocationStatus) >= 0;
 
     return {
       location_id: locationId,
@@ -2002,8 +2029,8 @@ function getRackInventory() {
       level: location.level || "",
       bin: location.bin || "",
       zone: location.zone || "",
-      location_status: location.current_status || "AVAILABLE",
-      can_add_inventory: !locationHardBlockReason_(location),
+      location_status: staleOccupiedStatus ? "AVAILABLE" : location.current_status || "AVAILABLE",
+      can_add_inventory: staleOccupiedStatus || !locationHardBlockReason_(location),
       occupied: Boolean(current),
       conflict: matches.length > 1,
       conflict_lot_ids: matches.map((entry) => entry.lot.internal_lot_id),
@@ -2136,6 +2163,10 @@ function updateExistingRackLot_(user, input, location, lot, purchaseUnits) {
 
 function addRackLot_(user, input, location, purchaseUnits) {
   if (purchaseUnits <= 0) throw new Error("Enter an amount greater than zero when adding inventory.");
+  if (["UNAVAILABLE", "OCCUPIED"].indexOf(String(location.current_status || "").trim().toUpperCase()) >= 0) {
+    syncLocationInventoryStatus_(location.location_id);
+    location = readTable_("LOCATIONS").find((row) => String(row.location_id) === String(location.location_id)) || location;
+  }
   const hardBlock = locationHardBlockReason_(location);
   if (hardBlock) throw new Error(`This rack space cannot receive inventory (${hardBlock}).`);
 
