@@ -44,7 +44,11 @@ export const listSalesOrders = () => cachedRead("listSalesOrders", [], base.list
 export const inventorySnapshot = () => cachedRead("inventorySnapshot", [], base.inventorySnapshot);
 export const getRackInventory = () => cachedRead("getRackInventory", [], base.getRackInventory);
 export const getOperationalReports = () => cachedRead("getOperationalReports", [], base.getOperationalReports);
-export const getPurchaseOrderDetail = (poId) => cachedRead("getPurchaseOrderDetail", [poId], () => base.getPurchaseOrderDetail(poId));
+export const getPurchaseOrderDetail = (poId) => cachedRead(
+  "getPurchaseOrderDetail",
+  [poId],
+  async () => normalizePurchaseOrderDetail(await base.getPurchaseOrderDetail(poId))
+);
 export const getSalesOrderDetail = (salesOrderId) => cachedRead("getSalesOrderDetail", [salesOrderId], () => base.getSalesOrderDetail(salesOrderId));
 export const listAmazonOutboundActivity = () => cachedRead("listAmazonOutboundActivity", [], base.listAmazonOutboundActivity);
 
@@ -68,7 +72,7 @@ export async function createSupplier(user, input) {
 }
 
 export async function createPurchaseOrder(user, input) {
-  return mutate(() => base.createPurchaseOrder(user, input));
+  return mutate(() => base.createPurchaseOrder(user, normalizePurchaseOrderInput(input)));
 }
 
 export async function purchaseOrderAction(user, poId, action) {
@@ -136,6 +140,50 @@ async function mutate(load) {
   const result = await load();
   clearApiCache();
   return result;
+}
+
+function normalizePurchaseOrderInput(input) {
+  const source = input || {};
+  const lines = Array.isArray(source.lines) ? source.lines.map((line) => {
+    const unitWeight = positiveNumber(line?.case_weight_lbs, line?.units_per_purchase_unit);
+    const quantity = Number(line?.qty_ordered ?? line?.quantity ?? 0);
+    return {
+      ...line,
+      case_weight_lbs: unitWeight,
+      units_per_purchase_unit: unitWeight,
+      expected_base_qty: Number.isFinite(quantity) ? quantity * unitWeight : 0
+    };
+  }) : [];
+  return { ...source, lines };
+}
+
+function normalizePurchaseOrderDetail(detail) {
+  if (!detail) return detail;
+  return {
+    ...detail,
+    lines: Array.isArray(detail.lines) ? detail.lines.map(normalizePurchaseOrderLine) : []
+  };
+}
+
+function normalizePurchaseOrderLine(line) {
+  const unitWeight = positiveNumber(line?.case_weight_lbs, line?.units_per_purchase_unit);
+  const quantity = Number(line?.qty_ordered || 0);
+  return {
+    ...line,
+    case_weight_lbs: unitWeight,
+    units_per_purchase_unit: unitWeight,
+    expected_base_qty: unitWeight > 0 && Number.isFinite(quantity)
+      ? quantity * unitWeight
+      : Number(line?.expected_base_qty || 0)
+  };
+}
+
+function positiveNumber(...values) {
+  for (const value of values) {
+    const number = Number(value);
+    if (Number.isFinite(number) && number > 0) return number;
+  }
+  return 0;
 }
 
 function normalizePurchaseOrderAction(action) {
