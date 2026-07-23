@@ -10,7 +10,7 @@ export async function render(ctx) {
     <div class="grid">
       ${can(ctx.user, "products:create") ? productForm() : ""}
       <section class="panel">
-        <div class="panel-header"><h2>Product Catalog</h2></div>
+        <div class="panel-header"><div><h2>Product Catalog</h2><p class="muted">Open Analytics to inspect historical and operational sales for any product.</p></div></div>
         ${table([
           { label: "Product ID", key: "product_id", sortable: true },
           { label: "Name", key: "product_name", sortable: true },
@@ -29,6 +29,10 @@ export async function render(ctx) {
             sortDirection: "desc",
             sortValue: (row) => inventorySortValue(inventoryByProduct[row.product_id]),
             render: (row) => inventoryText(inventoryByProduct[row.product_id])
+          },
+          {
+            label: "Analytics",
+            render: (row) => `<a class="btn secondary" href="#reports?product=${encodeURIComponent(row.product_id)}">View Analytics</a>`
           },
           {
             label: "Status",
@@ -127,30 +131,12 @@ function inventoryText(total) {
   return values.join(" / ") || "0";
 }
 
-function inventorySortValue(total) {
-  return total ? total.lbs || total.otherQty : 0;
-}
-
-function formatPerishability(value) {
-  const days = Number(value || 0);
-  return days > 0 ? `${formatNumber(days)} days` : "Non-perishable";
-}
-
+function inventorySortValue(total) { return total ? total.lbs || total.otherQty : 0; }
+function formatPerishability(value) { const days = Number(value || 0); return days > 0 ? `${formatNumber(days)} days` : "Non-perishable"; }
 function productStatus(row, user) {
   const checked = isProductActive(row);
   if (!can(user, "products:edit")) return checked ? "ACTIVE" : "OFF";
-  return `
-    <label class="switch">
-      <input data-product-status="${escapeHtml(row.product_id)}" type="checkbox" ${checked ? "checked" : ""}>
-      <span>${checked ? "Active" : "Off"}</span>
-    </label>
-  `;
+  return `<label class="switch"><input data-product-status="${escapeHtml(row.product_id)}" type="checkbox" ${checked ? "checked" : ""}><span>${checked ? "Active" : "Off"}</span></label>`;
 }
-
-function isProductActive(row) {
-  return row.is_active === true || String(row.is_active).toUpperCase() === "TRUE";
-}
-
-function formatNumber(value) {
-  return formatQuantity(value);
-}
+function isProductActive(row) { return row.is_active === true || String(row.is_active).toUpperCase() === "TRUE"; }
+function formatNumber(value) { return formatQuantity(value); }
