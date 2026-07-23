@@ -31,7 +31,15 @@ function installSalesOrderExplorer(root, orders = []) {
   table.closest(".panel")?.querySelector(".table-tools")?.remove();
   ensureStyles();
 
-  const orderMap = new Map(orders.map((order) => [String(order.sales_order_id || ""), order]));
+  const orderById = new Map();
+  const orderByFolio = new Map();
+  orders.forEach((order) => {
+    const id = String(order.sales_order_id || "").trim();
+    const folio = String(order.bl_folio || order.quickbooks_invoice_id || "").trim();
+    if (id) orderById.set(id, order);
+    if (folio) orderByFolio.set(folio, order);
+  });
+
   const headers = Array.from(table.tHead?.rows?.[0]?.cells || []);
   const productsIndex = headerIndex(headers, "Products");
   if (productsIndex >= 0) removeColumn(table, productsIndex);
@@ -46,13 +54,18 @@ function installSalesOrderExplorer(root, orders = []) {
   const folioValues = new Set();
 
   rows.forEach((row) => {
-    const idFromAction = row.querySelector("[data-sales-order-id]")?.dataset.salesOrderId;
-    const orderId = String(idFromAction || row.cells[0]?.textContent || "").trim();
-    const order = orderMap.get(orderId) || {};
-    const folio = String(order.bl_folio || order.quickbooks_invoice_id || orderId).trim();
-    const customer = String(order.customer?.supplier_name || order.customer_name || order.customer_id || labeledText(row, "Customer")).trim();
-    const status = String(order.status || labeledText(row, "Status")).trim().toUpperCase();
-    const date = normalizedDate(order.order_date || labeledText(row, "Date"));
+    const rawFirstCell = String(row.cells[0]?.textContent || "").trim();
+    const idFromAction = String(row.querySelector("[data-sales-order-id]")?.dataset.salesOrderId || "").trim();
+    const matchedOrder = orderById.get(idFromAction)
+      || orderById.get(rawFirstCell)
+      || orderByFolio.get(rawFirstCell)
+      || null;
+
+    const orderId = String(matchedOrder?.sales_order_id || idFromAction || rawFirstCell).trim();
+    const folio = String(matchedOrder?.bl_folio || matchedOrder?.quickbooks_invoice_id || rawFirstCell || orderId).trim();
+    const customer = String(matchedOrder?.customer?.supplier_name || matchedOrder?.customer_name || matchedOrder?.customer_id || labeledText(row, "Customer")).trim();
+    const status = String(matchedOrder?.status || labeledText(row, "Status")).trim().toUpperCase();
+    const date = normalizedDate(matchedOrder?.order_date || labeledText(row, "Date"));
 
     row.dataset.salesOrderId = orderId;
     row.dataset.salesFolio = folio;
@@ -70,7 +83,7 @@ function installSalesOrderExplorer(root, orders = []) {
       removeDuplicateDetailActions(actionCell);
       const remaining = actionCell.innerHTML.trim();
       actionCell.innerHTML = `<div class="sales-row-actions">
-        <a href="#" class="sales-view-link" data-sales-detail="${escapeHtml(orderId)}">View/Edit</a>
+        <a href="#" class="sales-view-link" data-sales-detail="${escapeHtml(orderId)}" data-sales-folio="${escapeHtml(folio)}">View/Edit</a>
         ${remaining ? `<div class="sales-secondary-actions">${remaining}</div>` : ""}
       </div>`;
     }
@@ -123,28 +136,48 @@ function installSalesOrderExplorer(root, orders = []) {
     applyFilters();
   });
 
-  table.addEventListener("click", async (event) => {
-    const folioLink = event.target.closest("[data-folio-link]");
-    if (folioLink) {
-      event.preventDefault();
-      controls.folio.value = folioLink.dataset.folioLink || "";
-      applyFilters();
-      return;
-    }
+  if (!table.dataset.salesExplorerReady) {
+    table.dataset.salesExplorerReady = "true";
+    table.addEventListener("click", async (event) => {
+      const folioLink = event.target.closest("[data-folio-link]");
+      if (folioLink) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        controls.folio.value = folioLink.dataset.folioLink || "";
+        applyFilters();
+        return;
+      }
 
-    const detailLink = event.target.closest("[data-sales-detail]");
-    if (!detailLink) return;
-    event.preventDefault();
-    const original = detailLink.textContent;
-    detailLink.textContent = "Loading...";
-    try {
-      showDetail(await getSalesOrderDetail(detailLink.dataset.salesDetail));
-    } catch (error) {
-      window.alert(error?.message || "Could not load the sales order.");
-    } finally {
-      detailLink.textContent = original;
-    }
-  });
+      const detailLink = event.target.closest("[data-sales-detail]");
+      if (!detailLink) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (detailLink.dataset.loading === "true") return;
+
+      detailLink.dataset.loading = "true";
+      const original = detailLink.textContent;
+      detailLink.textContent = "Loading...";
+
+      try {
+        const internalId = String(detailLink.dataset.salesDetail || "").trim();
+        const folio = String(detailLink.dataset.salesFolio || "").trim();
+        const order = orderById.get(internalId) || orderByFolio.get(folio);
+        const resolvedId = String(order?.sales_order_id || internalId).trim();
+        if (!resolvedId || !resolvedId.startsWith("SO-")) {
+          throw new Error("The internal Sales Order ID could not be resolved.");
+        }
+
+        const detail = await getSalesOrderDetail(resolvedId);
+        if (!detail?.order) throw new Error(`Sales Order ${resolvedId} was not found.`);
+        showDetail(detail);
+      } catch (error) {
+        window.alert(error?.message || "Could not load the sales order.");
+      } finally {
+        detailLink.dataset.loading = "false";
+        detailLink.textContent = original;
+      }
+    });
+  }
 
   applyFilters();
 }
@@ -157,9 +190,7 @@ function removeDuplicateDetailActions(cell) {
 }
 
 function showDetail(detail) {
-  if (!detail?.order) throw new Error("Sales Order was not found.");
   document.querySelector("[data-sales-detail-modal]")?.remove();
-
   const { order } = detail;
   const lines = detail.lines || [];
   const customer = order.customer?.supplier_name || order.customer_name || order.customer_id || "";
@@ -190,7 +221,7 @@ function showDetail(detail) {
     </section>`;
 
   const close = () => modal.remove();
-  modal.querySelectorAll("[data-close-detail]").forEach((element) => element.addEventListener("click", close));
+  modal.querySelectorAll("[data-close-detail]").forEach((element) => element.addEventListener("click", close, { once: true }));
   document.body.appendChild(modal);
 }
 
@@ -230,7 +261,6 @@ function installGroupedLotPricing(root) {
   const form = root.querySelector("#salesOrderForm");
   const container = root.querySelector("#salesLineItems");
   if (!form || !container) return;
-  let observer;
   const regroup = () => {
     const cards = Array.from(container.querySelectorAll(".sales-line-item"));
     const seen = new Set();
@@ -244,7 +274,7 @@ function installGroupedLotPricing(root) {
     });
   };
   form.addEventListener("change", () => queueMicrotask(regroup));
-  observer = new MutationObserver(regroup);
+  const observer = new MutationObserver(regroup);
   observer.observe(container, { childList: true, subtree: true });
   regroup();
 }
