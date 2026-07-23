@@ -1,7 +1,13 @@
 import { getOperationalReports } from "../js/api-smooth1.js?v=parties1";
 import { enableTableFilters, escapeHtml, formatMoney, formatQuantity, status, table } from "../js/utils.js";
+import { renderProductSalesAnalytics } from "./productSalesAnalytics.js?v=product-analytics1";
 
 const REPORT_BLOCKS = [
+  {
+    id: "product-sales",
+    title: "Product Sales Analytics",
+    subtitle: "Revenue, pricing, customers, margins, trends, and order drill-downs."
+  },
   {
     id: "planning",
     title: "Inventory Planning Metrics",
@@ -45,18 +51,23 @@ export async function render(ctx) {
   `;
 
   const detail = document.getElementById("reportDetail");
-  const showReport = (id) => {
-    detail.innerHTML = reportDetail(id, reports);
-    enableTableFilters(detail);
+  const showReport = async (id) => {
     document.querySelectorAll("[data-report-block]").forEach((button) => {
       button.classList.toggle("selected", button.dataset.reportBlock === id);
     });
+    if (id === "product-sales") {
+      detail.innerHTML = "";
+      await renderProductSalesAnalytics(detail);
+      return;
+    }
+    detail.innerHTML = reportDetail(id, reports);
+    enableTableFilters(detail);
   };
 
   document.querySelectorAll("[data-report-block]").forEach((button) => {
     button.addEventListener("click", () => showReport(button.dataset.reportBlock));
   });
-  showReport("planning");
+  await showReport(productIdFromHash() ? "product-sales" : "product-sales");
 }
 
 function reportBlockButton(block, reports) {
@@ -70,6 +81,7 @@ function reportBlockButton(block, reports) {
 }
 
 function reportCount(id, reports) {
+  if (id === "product-sales") return "Explore";
   if (id === "planning") return reports.inventoryPlanning.length;
   if (id === "suppliers") return reports.supplierAnalytics.length;
   if (id === "recommendations") return reports.recommendations.length;
@@ -179,34 +191,11 @@ function inventorySnapshot(reports) {
   `;
 }
 
-function countStatus(rows, value) {
-  return rows.filter((row) => row.status === value).length;
-}
-
-function supplierName(row) {
-  return `${escapeHtml(row.supplier_name)}<br><small>${escapeHtml(row.supplier_id)}</small>`;
-}
-
-function contact(row) {
-  const parts = [row.email, row.phone].filter(Boolean);
-  return parts.length ? parts.map(escapeHtml).join("<br>") : "No contact";
-}
-
-function money(value) {
-  return formatMoney(value);
-}
-
-function quantity(value) {
-  if (value === "" || value === null || value === undefined) return "";
-  return formatQuantity(value);
-}
-
-function percent(value) {
-  return `${formatQuantity(value, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`;
-}
-
-function formatDate(value) {
-  if (!value) return "now";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? "now" : date.toLocaleString();
-}
+function countStatus(rows, value) { return rows.filter((row) => row.status === value).length; }
+function supplierName(row) { return `${escapeHtml(row.supplier_name)}<br><small>${escapeHtml(row.supplier_id)}</small>`; }
+function contact(row) { const parts = [row.email, row.phone].filter(Boolean); return parts.length ? parts.map(escapeHtml).join("<br>") : "No contact"; }
+function money(value) { return formatMoney(value); }
+function quantity(value) { if (value === "" || value === null || value === undefined) return ""; return formatQuantity(value); }
+function percent(value) { return `${formatQuantity(value, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`; }
+function formatDate(value) { if (!value) return "now"; const date = new Date(value); return Number.isNaN(date.getTime()) ? "now" : date.toLocaleString(); }
+function productIdFromHash() { const query = String(window.location.hash || "").split("?")[1] || ""; return new URLSearchParams(query).get("product") || ""; }
