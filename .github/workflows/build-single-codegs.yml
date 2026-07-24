@@ -89,7 +89,6 @@ jobs:
 
               raise RuntimeError(f"Closing brace not found for {name}")
 
-          # These functions are replaced by ProductReports.gs or are unused legacy copies.
           obsolete = [
               "getOperationalReports",
               "buildInventoryPlanning_",
@@ -99,7 +98,6 @@ jobs:
           for function_name in obsolete:
               base = remove_function(base, function_name)
 
-          # Remove the instructional header because the output is already a single file.
           reports = re.sub(r"^/\*\*[\s\S]*?\*/\s*", "", reports, count=1)
 
           header = '''/**
@@ -111,7 +109,6 @@ jobs:
           combined = header + base.rstrip() + "\n\n\n// ================= PRODUCT REPORTS V3 =================\n\n" + reports.rstrip() + "\n"
           output_path.write_text(combined, encoding="utf-8")
 
-          # Basic duplicate and structure checks.
           assert combined.count("function getOperationalReports(") == 1
           assert "function doGet(" in combined
           assert "function doPost(" in combined
@@ -132,3 +129,5 @@ jobs:
           git add apps-script/Code.full.gs
           git commit -m "Build complete single Code.gs [skip ci]"
           git push
+
+# Triggered after workflow creation so GitHub runs the generator.
