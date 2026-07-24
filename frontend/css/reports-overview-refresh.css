@@ -1,0 +1,407 @@
+/* Overview and searchable report menu refinements.
+   Branch: codex/professional-ui-refresh */
+
+.product-dashboard .dashboard-toolbar {
+  align-items: end !important;
+  display: grid !important;
+  gap: 12px !important;
+  grid-template-columns: minmax(300px, 1.7fr) minmax(170px, .75fr) minmax(155px, .7fr) auto !important;
+  overflow: visible !important;
+  position: relative;
+  z-index: 20;
+}
+
+.product-dashboard .dashboard-mode[hidden],
+.product-dashboard .product-field[hidden] {
+  display: none !important;
+}
+
+.report-command-picker {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  position: relative;
+  z-index: 30;
+}
+
+.report-command-label {
+  color: #607268;
+  font-size: 10px;
+  font-weight: 850;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+
+.report-command-input-wrap {
+  align-items: center;
+  background: #fff;
+  border: 1px solid #cbd9cf;
+  border-radius: 9px;
+  display: grid;
+  grid-template-columns: 25px minmax(0, 1fr) 20px;
+  min-height: 44px;
+  padding: 0 11px;
+  transition: border-color .16s ease, box-shadow .16s ease;
+}
+
+.report-command-picker.open .report-command-input-wrap,
+.report-command-input-wrap:focus-within {
+  border-color: #27704a;
+  box-shadow: 0 0 0 3px rgba(39, 112, 74, .13);
+}
+
+.report-command-icon,
+.report-command-chevron {
+  color: #687a70;
+  font-size: 18px;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.report-command-chevron {
+  font-size: 16px;
+  text-align: right;
+}
+
+.report-command-input {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  color: #15291d !important;
+  font: inherit;
+  font-size: 13px !important;
+  font-weight: 720;
+  min-height: 42px !important;
+  min-width: 0;
+  outline: 0 !important;
+  padding: 0 4px !important;
+  width: 100%;
+}
+
+.report-command-input::-webkit-search-cancel-button {
+  cursor: pointer;
+}
+
+.report-command-menu {
+  background: #fff;
+  border: 1px solid #d5e0d8;
+  border-radius: 12px;
+  box-shadow: 0 18px 42px rgba(14, 48, 30, .18);
+  left: 0;
+  max-height: 390px;
+  min-width: min(470px, calc(100vw - 40px));
+  overflow-y: auto;
+  padding: 7px;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 7px);
+  z-index: 100;
+}
+
+.report-command-menu[hidden] {
+  display: none !important;
+}
+
+.product-dashboard button.report-command-option {
+  align-items: center !important;
+  background: #fff !important;
+  border: 1px solid transparent !important;
+  border-radius: 9px !important;
+  box-shadow: none !important;
+  color: #173023 !important;
+  display: grid !important;
+  gap: 11px !important;
+  grid-template-columns: 34px minmax(0, 1fr) auto !important;
+  min-height: 57px !important;
+  padding: 9px 10px !important;
+  text-align: left !important;
+  width: 100%;
+}
+
+.product-dashboard button.report-command-option:hover,
+.product-dashboard button.report-command-option:focus-visible {
+  background: #f5f9f6 !important;
+  border-color: #cddbd1 !important;
+  outline: 0 !important;
+}
+
+.product-dashboard button.report-command-option.selected {
+  background: #edf6f0 !important;
+  border-color: #bdd4c4 !important;
+}
+
+.report-command-avatar {
+  align-items: center;
+  background: #edf3ef;
+  border-radius: 8px;
+  color: #345b43;
+  display: flex;
+  font-size: 12px;
+  font-weight: 900;
+  height: 34px;
+  justify-content: center;
+  width: 34px;
+}
+
+.report-command-avatar.overview {
+  background: #dfeee4;
+  color: #17613c;
+  font-size: 16px;
+}
+
+.report-command-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.report-command-copy strong {
+  color: #163022 !important;
+  font-size: 13px !important;
+  font-weight: 800 !important;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.report-command-copy small {
+  color: #718178 !important;
+  font-size: 10px !important;
+  line-height: 1.35;
+}
+
+.report-command-action {
+  color: #267048;
+  font-size: 10px;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.report-command-section {
+  color: #77877e;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: .12em;
+  padding: 11px 10px 5px;
+  text-transform: uppercase;
+}
+
+.report-command-empty {
+  color: #6c7d73;
+  font-size: 12px;
+  padding: 18px 12px;
+  text-align: center;
+}
+
+/* Override the global professional.css button rule that made report rows solid green. */
+.product-dashboard button.attention-row,
+.product-dashboard .ranking-list button {
+  background: #fff !important;
+  border: 0 !important;
+  border-bottom: 1px solid #e7ede9 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  color: #172b20 !important;
+}
+
+.product-dashboard button.attention-row {
+  border: 1px solid #dce6df !important;
+  border-radius: 10px !important;
+  grid-template-columns: 40px minmax(0, 1fr) auto !important;
+  min-height: 74px !important;
+  padding: 12px 14px !important;
+}
+
+.product-dashboard button.attention-row:hover,
+.product-dashboard button.attention-row:focus-visible {
+  background: #f8fbf9 !important;
+  border-color: #b7cdbd !important;
+  box-shadow: 0 6px 18px rgba(20, 58, 35, .06) !important;
+  outline: 0 !important;
+  transform: translateY(-1px);
+}
+
+.product-dashboard .attention-row > span:nth-child(2) {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.product-dashboard .attention-row strong {
+  color: #173023 !important;
+  font-size: 13px !important;
+  font-weight: 820 !important;
+}
+
+.product-dashboard .attention-row em {
+  color: #2d5d3e !important;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.product-dashboard .attention-row small {
+  color: #718178 !important;
+  font-size: 10px !important;
+  line-height: 1.4;
+}
+
+.product-dashboard .attention-row > b {
+  color: #276f48 !important;
+  font-size: 10px !important;
+  font-weight: 850 !important;
+  white-space: nowrap;
+}
+
+.product-dashboard .attention-icon {
+  background: #edf4ef !important;
+  border-radius: 9px !important;
+  color: #2c6843 !important;
+}
+
+.product-dashboard .attention-reorder .attention-icon {
+  background: #fff4d9 !important;
+  color: #94600e !important;
+}
+
+.product-dashboard .attention-expiration .attention-icon,
+.product-dashboard .attention-low_margin .attention-icon {
+  background: #fff0ee !important;
+  color: #a43831 !important;
+}
+
+.product-dashboard .attention-excess .attention-icon {
+  background: #eef3fb !important;
+  color: #3d6594 !important;
+}
+
+.product-dashboard .ranking-card {
+  background: #fff !important;
+  min-height: 0 !important;
+  padding: 0 !important;
+}
+
+.product-dashboard .ranking-card .section-heading {
+  border-bottom: 1px solid #e5ece7;
+  margin: 0 !important;
+  padding: 17px 18px 13px;
+}
+
+.product-dashboard .ranking-list {
+  padding: 2px 18px 8px;
+}
+
+.product-dashboard .ranking-list button {
+  align-items: center !important;
+  display: grid !important;
+  gap: 10px !important;
+  grid-template-columns: 27px minmax(0, 1fr) auto !important;
+  min-height: 59px !important;
+  padding: 10px 2px !important;
+  text-align: left !important;
+  width: 100%;
+}
+
+.product-dashboard .ranking-list button:last-child {
+  border-bottom: 0 !important;
+}
+
+.product-dashboard .ranking-list button:hover,
+.product-dashboard .ranking-list button:focus-visible {
+  background: #f8fbf9 !important;
+  color: #172b20 !important;
+  outline: 0 !important;
+}
+
+.product-dashboard .ranking-list button > b {
+  align-items: center;
+  background: #edf3ef !important;
+  border-radius: 50%;
+  color: #4f6d5b !important;
+  display: flex;
+  font-size: 10px !important;
+  font-weight: 900 !important;
+  height: 25px;
+  justify-content: center;
+  width: 25px;
+}
+
+.product-dashboard .ranking-list button > span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.product-dashboard .ranking-list strong {
+  color: #183025 !important;
+  font-size: 12px !important;
+  font-weight: 790 !important;
+}
+
+.product-dashboard .ranking-list small {
+  color: #74837a !important;
+  font-size: 9px !important;
+  line-height: 1.35;
+}
+
+.product-dashboard .ranking-list em {
+  color: #226b43 !important;
+  font-size: 11px !important;
+  font-style: normal;
+  font-weight: 850 !important;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.product-dashboard .attention-list {
+  gap: 9px !important;
+}
+
+.product-dashboard .dashboard-ranking-grid {
+  gap: 14px !important;
+}
+
+@media (max-width: 1180px) {
+  .product-dashboard .dashboard-toolbar {
+    grid-template-columns: minmax(260px, 1.4fr) minmax(150px, .8fr) minmax(145px, .75fr) auto !important;
+  }
+}
+
+@media (max-width: 900px) {
+  .product-dashboard .dashboard-toolbar {
+    grid-template-columns: 1fr 1fr !important;
+  }
+
+  .report-command-picker {
+    grid-column: 1 / -1;
+  }
+
+  .dashboard-refresh {
+    width: 100%;
+  }
+}
+
+@media (max-width: 620px) {
+  .product-dashboard .dashboard-toolbar {
+    grid-template-columns: 1fr !important;
+  }
+
+  .report-command-menu {
+    min-width: 100%;
+    right: auto;
+    width: 100%;
+  }
+
+  .product-dashboard button.attention-row {
+    grid-template-columns: 38px minmax(0, 1fr) !important;
+  }
+
+  .product-dashboard .attention-row > b,
+  .product-dashboard .ranking-list em {
+    display: none !important;
+  }
+
+  .product-dashboard .ranking-list button {
+    grid-template-columns: 27px minmax(0, 1fr) !important;
+  }
+}
