@@ -98,7 +98,10 @@
   z-index: 100;
 }
 
-.report-command-menu[hidden] {
+.report-command-menu[hidden],
+.product-dashboard .report-command-option[hidden],
+.product-dashboard .report-command-section[hidden],
+.product-dashboard .report-command-empty[hidden] {
   display: none !important;
 }
 
