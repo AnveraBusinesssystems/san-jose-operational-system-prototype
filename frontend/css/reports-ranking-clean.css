@@ -1,6 +1,6 @@
-/* Final ranking-list treatment for the Product Analytics overview.
+/* Final interactive-list treatment for the Product Analytics overview.
    Loaded after the other report styles so global button rules cannot
-   turn these rows into solid green blocks. */
+   turn report rows into solid green blocks. */
 
 .product-dashboard .ranking-card .ranking-list button {
   appearance: none;
@@ -61,13 +61,69 @@
   transform: scale(0.995);
 }
 
+/* Needs Attention cards */
+.product-dashboard .attention-panel .attention-list button.attention-row {
+  appearance: none;
+  -webkit-appearance: none;
+  background: #ffffff !important;
+  background-image: none !important;
+  border: 1px solid #dce5df !important;
+  border-radius: 10px !important;
+  box-shadow: none !important;
+  color: #111111 !important;
+  cursor: pointer;
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    transform 120ms ease;
+}
+
+.product-dashboard .attention-panel .attention-row strong {
+  color: #111111 !important;
+  font-weight: 800 !important;
+}
+
+.product-dashboard .attention-panel .attention-row em,
+.product-dashboard .attention-panel .attention-row small,
+.product-dashboard .attention-panel .attention-row > b {
+  color: #111111 !important;
+  font-weight: 500 !important;
+  opacity: 0.72;
+}
+
+.product-dashboard .attention-panel .attention-row .attention-icon {
+  color: #111111 !important;
+}
+
+.product-dashboard .attention-panel .attention-list button.attention-row:hover,
+.product-dashboard .attention-panel .attention-list button.attention-row:focus-visible {
+  background: #e8f3eb !important;
+  background-image: none !important;
+  border-color: #b8d2c0 !important;
+  box-shadow: inset 4px 0 0 #2f7a4d !important;
+  color: #111111 !important;
+  outline: 0 !important;
+  transform: translateY(-1px);
+}
+
+.product-dashboard .attention-panel .attention-list button.attention-row:active {
+  background: #d8ebde !important;
+  border-color: #9fc3aa !important;
+  box-shadow: inset 5px 0 0 #1f633c !important;
+  transform: scale(0.997);
+}
+
 @media (hover: none) {
-  .product-dashboard .ranking-card .ranking-list button:hover {
+  .product-dashboard .ranking-card .ranking-list button:hover,
+  .product-dashboard .attention-panel .attention-list button.attention-row:hover {
     background: #ffffff !important;
     box-shadow: none !important;
+    transform: none;
   }
 
-  .product-dashboard .ranking-card .ranking-list button:active {
+  .product-dashboard .ranking-card .ranking-list button:active,
+  .product-dashboard .attention-panel .attention-list button.attention-row:active {
     background: #d8ebde !important;
     box-shadow: inset 5px 0 0 #1f633c !important;
   }
