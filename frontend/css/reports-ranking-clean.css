@@ -1,0 +1,74 @@
+/* Final ranking-list treatment for the Product Analytics overview.
+   Loaded after the other report styles so global button rules cannot
+   turn these rows into solid green blocks. */
+
+.product-dashboard .ranking-card .ranking-list button {
+  appearance: none;
+  -webkit-appearance: none;
+  background: #ffffff !important;
+  background-image: none !important;
+  border: 0 !important;
+  border-bottom: 1px solid #e1e7e3 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  color: #111111 !important;
+  cursor: pointer;
+  transition:
+    background-color 160ms ease,
+    box-shadow 160ms ease,
+    transform 120ms ease;
+}
+
+.product-dashboard .ranking-card .ranking-list button:last-child {
+  border-bottom: 0 !important;
+}
+
+.product-dashboard .ranking-card .ranking-list button strong {
+  color: #111111 !important;
+  font-weight: 800 !important;
+}
+
+.product-dashboard .ranking-card .ranking-list button small,
+.product-dashboard .ranking-card .ranking-list button em {
+  color: #111111 !important;
+  font-weight: 500 !important;
+  opacity: 0.72;
+}
+
+.product-dashboard .ranking-card .ranking-list button > b {
+  background: #eef3ef !important;
+  color: #111111 !important;
+  font-weight: 700 !important;
+}
+
+.product-dashboard .ranking-card .ranking-list button:hover,
+.product-dashboard .ranking-card .ranking-list button:focus-visible {
+  background: #e8f3eb !important;
+  background-image: none !important;
+  box-shadow: inset 4px 0 0 #2f7a4d !important;
+  color: #111111 !important;
+  outline: 0 !important;
+}
+
+.product-dashboard .ranking-card .ranking-list button:hover > b,
+.product-dashboard .ranking-card .ranking-list button:focus-visible > b {
+  background: #d2e7d9 !important;
+}
+
+.product-dashboard .ranking-card .ranking-list button:active {
+  background: #d8ebde !important;
+  box-shadow: inset 5px 0 0 #1f633c !important;
+  transform: scale(0.995);
+}
+
+@media (hover: none) {
+  .product-dashboard .ranking-card .ranking-list button:hover {
+    background: #ffffff !important;
+    box-shadow: none !important;
+  }
+
+  .product-dashboard .ranking-card .ranking-list button:active {
+    background: #d8ebde !important;
+    box-shadow: inset 5px 0 0 #1f633c !important;
+  }
+}
