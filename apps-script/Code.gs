@@ -1,5 +1,5 @@
 const SPREADSHEET_ID = "1XYaMXKGR5EG8VS38PPiHFNbtmwX5Ae6N33jLE72nxKE";
-const BACKEND_VERSION = "rack-inventory-v2-2026-07-17";
+const BACKEND_VERSION = "rack-inventory-v3-po-weight-2026-07-27";
 
 
 const ROLES = {
@@ -261,6 +261,36 @@ function isActiveRecord_(row) {
 function number_(value, fallback) {
   const n = Number(value);
   return Number.isFinite(n) ? n : (fallback || 0);
+}
+
+
+/**
+ * Returns the first valid positive numeric value.
+ * This avoids a string value such as "0" blocking a valid fallback weight.
+ */
+function firstPositiveNumber_() {
+  for (let index = 0; index < arguments.length; index += 1) {
+    const candidate = Number(arguments[index]);
+    if (Number.isFinite(candidate) && candidate > 0) return candidate;
+  }
+  return 0;
+}
+
+
+/**
+ * Resolves pounds per purchase unit from the current website field,
+ * legacy field names, and finally the Product master defaults.
+ */
+function resolvePurchaseUnitWeight_(line, product) {
+  line = line || {};
+  product = product || {};
+  return firstPositiveNumber_(
+    line.case_weight_lbs,
+    line.units_per_purchase_unit,
+    line.unit_weight_lbs,
+    product.units_per_purchase_unit,
+    product.case_weight_lbs
+  );
 }
 
 
@@ -571,75 +601,144 @@ function createPurchaseOrder(payload) {
   const user = payload.user || {};
   requirePermission_(user, "purchaseOrders:create");
   const input = payload.input || {};
-  const supplierId = input.supplier_id || input.vendor_id;
-  const lines = Array.isArray(input.lines) ? input.lines : [];
-  if (!supplierId) throw new Error("Choose a supplier.");
-  if (!lines.length) throw new Error("Add at least one product line.");
-  ensureTableColumns_("PURCHASE_ORDERS", CORE_SCHEMA.PURCHASE_ORDERS);
-  ensureTableColumns_("PURCHASE_ORDER_LINES", CORE_SCHEMA.PURCHASE_ORDER_LINES);
-  const poId = input.po_id || nextId_("PURCHASE_ORDERS", "po_id", "PO");
-  const currency = input.currency || "USD";
-  const shipping = number_(input.shipping_amount, 0);
-  const taxRate = number_(input.tax_rate_percent !== undefined ? input.tax_rate_percent : input.tax_rate, 0);
-  const taxEnabled = input.tax_enabled === true || String(input.tax_enabled).toUpperCase() === "TRUE";
-  let subtotal = 0;
-  const productMap = byId_(readTable_("PRODUCTS"), "product_id");
-  lines.forEach((line) => subtotal += number_(line.qty_ordered || line.quantity, 0) * number_(line.unit_cost || line.cost, 0));
-  const tax = taxEnabled ? subtotal * taxRate / 100 : 0;
-  const po = {
-    po_id: poId,
-    po_status: normalizePurchaseOrderStatus_(input.po_status || "DRAFT"),
-    supplier_id: supplierId,
-    created_by: user.user_id || user.role,
-    order_date: input.order_date || today_(),
-    expected_delivery_date: input.expected_delivery_date || "",
-    payment_terms: input.payment_terms || "",
-    currency,
-    subtotal_amount: subtotal,
-    tax_amount: tax,
-    shipping_amount: shipping,
-    total_amount: subtotal + tax + shipping,
-    notes: input.notes || "",
-    tax_enabled: taxEnabled,
-    tax_rate: taxRate,
-    ship_via: input.ship_via || "",
-    bill_status: input.bill_status || "NOT_CREATED"
-  };
-  appendRecord_("PURCHASE_ORDERS", po);
-  lines.forEach((line) => {
-    const product = productMap[line.product_id] || {};
-    const qty = number_(line.qty_ordered || line.quantity, 0);
-    const unitCost = number_(line.unit_cost || line.cost, 0);
-    const unitsPer = number_(line.units_per_purchase_unit || product.units_per_purchase_unit || product.case_weight_lbs, 0);
-    const lineRecord = {
-      po_line_id: nextId_("PURCHASE_ORDER_LINES", "po_line_id", "POL"),
-      po_id: poId,
-      supplier_id: supplierId,
-      product_id: line.product_id,
-      line_status: "OPEN",
-      qty_ordered: qty,
-      qty_received_total: 0,
-      qty_remaining: qty,
-      unit_type: line.unit_type || product.default_unit || "CASE",
-      unit_cost: unitCost,
-      currency,
-      line_total: qty * unitCost,
-      supplier_expected_lot_number: line.supplier_expected_lot_number || "",
-      notes: line.notes || "",
-      base_unit: line.base_unit || product.base_unit || "LB",
-      units_per_purchase_unit: unitsPer,
-      expected_base_qty: qty * unitsPer,
-      case_weight_lbs: unitsPer,
-      qr_value: line.qr_value || ""
-    };
-    lineRecord.qr_value = lineRecord.qr_value || lineRecord.po_line_id;
-    appendRecord_("PURCHASE_ORDER_LINES", lineRecord);
-  });
-  writeAuditLog_({ user_id: user.user_id, role: user.role, action_type: "CREATE_PO", table_name: "PURCHASE_ORDERS", record_id: poId });
-  const detail = getPurchaseOrderDetail({ po_id: poId });
-  return { ...detail.po, lines: detail.lines };
-}
+  const supplierId = String(input.supplier_id || input.vendor_id || "").trim();
+  const requestedLines = Array.isArray(input.lines) ? input.lines : [];
 
+  if (!supplierId) throw new Error("Choose a supplier.");
+  if (!requestedLines.length) throw new Error("Add at least one product line.");
+
+  return withScriptLock_(function () {
+    ensureTableColumns_("PURCHASE_ORDERS", CORE_SCHEMA.PURCHASE_ORDERS);
+    ensureTableColumns_("PURCHASE_ORDER_LINES", CORE_SCHEMA.PURCHASE_ORDER_LINES);
+
+    const poId = input.po_id || nextId_("PURCHASE_ORDERS", "po_id", "PO");
+    const currency = input.currency || "USD";
+    const shipping = number_(input.shipping_amount, 0);
+    const taxRate = number_(
+      input.tax_rate_percent !== undefined ? input.tax_rate_percent : input.tax_rate,
+      0
+    );
+    const taxEnabled =
+      input.tax_enabled === true ||
+      String(input.tax_enabled || "").toUpperCase() === "TRUE";
+    const productMap = byId_(readTable_("PRODUCTS"), "product_id");
+    const poLineIds = nextIdBatch_(
+      "PURCHASE_ORDER_LINES",
+      "po_line_id",
+      "POL",
+      requestedLines.length
+    );
+
+    let subtotal = 0;
+
+    // Validate and calculate all lines before writing anything to the Sheet.
+    const lineRecords = requestedLines.map((line, index) => {
+      line = line || {};
+      const productId = String(line.product_id || "").trim();
+      const product = productMap[productId];
+      const qty = number_(
+        line.qty_ordered !== undefined ? line.qty_ordered : line.quantity,
+        0
+      );
+      const unitCost = number_(
+        line.unit_cost !== undefined ? line.unit_cost : line.cost,
+        0
+      );
+      const unitType = String(
+        line.unit_type || (product || {}).default_unit || "CASE"
+      ).trim().toUpperCase();
+      const unitsPer = resolvePurchaseUnitWeight_(line, product);
+      const poLineId = poLineIds[index];
+
+      if (!product) {
+        throw new Error("Select a valid product on line " + (index + 1) + ".");
+      }
+      if (qty <= 0) {
+        throw new Error("Quantity must be greater than zero on line " + (index + 1) + ".");
+      }
+      if (!unitType) {
+        throw new Error("Purchase unit is required on line " + (index + 1) + ".");
+      }
+      if (unitsPer <= 0) {
+        throw new Error("Unit weight must be greater than zero on line " + (index + 1) + ".");
+      }
+      if (unitCost < 0) {
+        throw new Error("Unit cost cannot be negative on line " + (index + 1) + ".");
+      }
+
+      const lineTotal = qty * unitCost;
+      subtotal += lineTotal;
+
+      return {
+        po_line_id: poLineId,
+        po_id: poId,
+        supplier_id: supplierId,
+        product_id: productId,
+        line_status: "OPEN",
+        qty_ordered: qty,
+        qty_received_total: 0,
+        qty_remaining: qty,
+        unit_type: unitType,
+        unit_cost: unitCost,
+        currency,
+        line_total: lineTotal,
+        supplier_expected_lot_number: line.supplier_expected_lot_number || "",
+        notes: line.notes || "",
+        base_unit: line.base_unit || product.base_unit || "LB",
+
+        // Keep every weight field synchronized for the website, receiving,
+        // inventory lots, and Product Dashboard calculations.
+        units_per_purchase_unit: unitsPer,
+        expected_base_qty: qty * unitsPer,
+        case_weight_lbs: unitsPer,
+
+        qr_value: line.qr_value || poLineId
+      };
+    });
+
+    const tax = taxEnabled ? subtotal * taxRate / 100 : 0;
+    const po = {
+      po_id: poId,
+      po_status: normalizePurchaseOrderStatus_(input.po_status || "DRAFT"),
+      supplier_id: supplierId,
+      created_by: user.user_id || user.role,
+      order_date: input.order_date || today_(),
+      expected_delivery_date: input.expected_delivery_date || "",
+      payment_terms: input.payment_terms || "",
+      currency,
+      subtotal_amount: subtotal,
+      tax_amount: tax,
+      shipping_amount: shipping,
+      total_amount: subtotal + tax + shipping,
+      notes: input.notes || "",
+      tax_enabled: taxEnabled,
+      tax_rate: taxRate,
+      ship_via: input.ship_via || "",
+      bill_status: input.bill_status || "NOT_CREATED"
+    };
+
+    const writes = [];
+    try {
+      writes.push(appendRecords_("PURCHASE_ORDERS", [po]));
+      writes.push(appendRecords_("PURCHASE_ORDER_LINES", lineRecords));
+    } catch (error) {
+      writes.reverse().forEach(rollbackAppendedRange_);
+      throw error;
+    }
+
+    writeAuditLog_({
+      user_id: user.user_id,
+      role: user.role,
+      action_type: "CREATE_PO",
+      table_name: "PURCHASE_ORDERS",
+      record_id: poId,
+      notes: "Purchase-unit weights validated and expected pounds calculated."
+    });
+
+    const detail = getPurchaseOrderDetail({ po_id: poId });
+    return { ...detail.po, lines: detail.lines };
+  });
+}
 
 
 function updatePurchaseOrder_(payload) {
@@ -682,7 +781,7 @@ function updatePurchaseOrder_(payload) {
       const qty = number_(source.qty_ordered || source.quantity, 0);
       const unitCost = number_(source.unit_cost || source.cost, 0);
       const unitType = String(source.unit_type || "").trim().toUpperCase();
-      const unitsPer = number_(source.case_weight_lbs || source.units_per_purchase_unit, 0);
+      const unitsPer = resolvePurchaseUnitWeight_(source, product);
       if (!product) throw new Error("Select a valid product on line " + (index + 1) + ".");
       if (qty <= 0) throw new Error("Quantity must be greater than zero on line " + (index + 1) + ".");
       if (!unitType) throw new Error("Purchase unit is required on line " + (index + 1) + ".");
@@ -832,7 +931,7 @@ function receiveProduct(payload) {
 
     const products = byId_(readTable_("PRODUCTS"), "product_id");
     const product = products[line.product_id] || {};
-    const unitsPer = number_(line.units_per_purchase_unit || line.case_weight_lbs || product.units_per_purchase_unit || product.case_weight_lbs, 0);
+    const unitsPer = resolvePurchaseUnitWeight_(line, product);
     if (qtyAccepted > 0.0001 && unitsPer <= 0) {
       throw new Error("This PO line has no valid unit weight. Add a unit weight before receiving inventory.");
     }
@@ -1234,7 +1333,7 @@ function recommendPutawayLocations(payload) {
   const products = byId_(readTable_("PRODUCTS"), "product_id");
   const product = products[input.product_id || (line || {}).product_id] || {};
   if (!product.product_id) throw new Error("Choose a valid PO line or product before requesting locations.");
-  const unitsPer = number_((line || {}).units_per_purchase_unit || (line || {}).case_weight_lbs || product.units_per_purchase_unit || product.case_weight_lbs, 0);
+  const unitsPer = resolvePurchaseUnitWeight_(line || {}, product);
   const palletCount = Math.max(1, Math.floor(number_(input.pallet_count, 1)));
   const acceptedQty = number_(input.qty_accepted !== undefined ? input.qty_accepted : number_(input.qty_received, 0) - number_(input.qty_damaged, 0), 0);
   const perPalletBase = unitsPer > 0 && acceptedQty > 0 ? acceptedQty * unitsPer / palletCount : 0;
