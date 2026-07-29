@@ -1,6 +1,7 @@
 import { GOOGLE_SCRIPT_WEB_APP_URL } from "./config.js?v=rack-inventory2";
 
 const TIMEOUT_MS = 20000;
+const WAREHOUSE_ACTION = "warehouseV2Api";
 
 function appsUrl() {
   if (!GOOGLE_SCRIPT_WEB_APP_URL || !GOOGLE_SCRIPT_WEB_APP_URL.includes("/exec")) {
@@ -9,7 +10,7 @@ function appsUrl() {
   return GOOGLE_SCRIPT_WEB_APP_URL;
 }
 
-async function call(action, payload = {}, timeoutMs = TIMEOUT_MS) {
+async function call(operation, payload = {}, timeoutMs = TIMEOUT_MS) {
   return new Promise((resolve, reject) => {
     const callback = `sjopsWarehouseV2_${Date.now()}_${Math.random().toString(36).slice(2)}`;
     const script = document.createElement("script");
@@ -18,8 +19,8 @@ async function call(action, payload = {}, timeoutMs = TIMEOUT_MS) {
       reject(new Error("Warehouse request timed out."));
     }, timeoutMs);
     const url = new URL(appsUrl());
-    url.searchParams.set("action", action);
-    url.searchParams.set("payload", JSON.stringify(payload));
+    url.searchParams.set("action", WAREHOUSE_ACTION);
+    url.searchParams.set("payload", JSON.stringify({ operation, ...payload }));
     url.searchParams.set("callback", callback);
 
     function cleanup() {
@@ -32,7 +33,7 @@ async function call(action, payload = {}, timeoutMs = TIMEOUT_MS) {
       cleanup();
       if (!response?.ok) {
         const message = response?.error || "Warehouse request failed.";
-        if (message.includes("Unknown action")) {
+        if (message.includes("Unknown action") || message.includes("Unknown warehouse operation")) {
           reject(new Error("Warehouse backend upgrade required. Redeploy the latest Apps Script code before using this workflow."));
           return;
         }
