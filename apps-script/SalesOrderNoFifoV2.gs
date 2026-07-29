@@ -1,6 +1,7 @@
 // SalesOrderNoFifoV2.gs
 // New operational Sales Orders describe what the customer bought.
 // Physical lot/location selection happens later in Send Product.
+// Confirmed demand is protected by PRODUCT, not by a preselected lot or rack.
 
 function createSalesOrderNoFifoV2(payload) {
   payload = payload || {};
@@ -21,15 +22,10 @@ function createSalesOrderNoFifoV2(payload) {
       throw new Error("Select a valid customer.");
     }
 
-    const snapshot = inventorySnapshot();
-    const availableByProduct = {};
-    const valueByProduct = {};
-    snapshot.forEach(function (row) {
-      const productId = String(row.product_id || "");
-      if (!productId) return;
-      availableByProduct[productId] = number_(availableByProduct[productId], 0) + number_(row.available_qty, row.current_qty);
-      valueByProduct[productId] = number_(valueByProduct[productId], 0) + number_(row.inventory_value, 0);
-    });
+    const physicalByProduct = salesPhysicalBaseByProductNoFifoV2_();
+    const committedByProduct = salesCommittedBaseByProductNoFifoV2_("");
+    const freeByProduct = salesFreeBaseByProductNoFifoV2_(physicalByProduct, committedByProduct);
+    const valueByProduct = salesInventoryValueByProductNoFifoV2_();
 
     const requestedBaseByProduct = {};
     const salesOrderId = input.sales_order_id || nextId_("SALES_ORDERS", "sales_order_id", "SO");
@@ -55,12 +51,13 @@ function createSalesOrderNoFifoV2(payload) {
 
       const baseQty = unit === "LB" ? qty : qty * unitWeight;
       requestedBaseByProduct[productId] = number_(requestedBaseByProduct[productId], 0) + baseQty;
-      if (requestedBaseByProduct[productId] > number_(availableByProduct[productId], 0) + 0.0001) {
-        throw new Error((product.product_name || productId) + " exceeds currently available inventory.");
+      const freeBase = number_(freeByProduct[productId], 0);
+      if (requestedBaseByProduct[productId] > freeBase + 0.0001) {
+        throw new Error((product.product_name || productId) + " exceeds uncommitted inventory. " + round2V2_(freeBase) + " LB is currently free after other confirmed orders.");
       }
 
-      const productAvailable = number_(availableByProduct[productId], 0);
-      const averageCostPerLb = productAvailable > 0 ? number_(valueByProduct[productId], 0) / productAvailable : 0;
+      const physicalBase = number_(physicalByProduct[productId], 0);
+      const averageCostPerLb = physicalBase > 0 ? number_(valueByProduct[productId], 0) / physicalBase : 0;
       const estimatedUnitCost = source.unit_cost !== undefined && source.unit_cost !== ""
         ? number_(source.unit_cost, 0)
         : averageCostPerLb * unitWeight;
@@ -180,18 +177,17 @@ function confirmSalesOrderNoFifoV2(payload) {
     }
     if (!detail.lines.length) throw new Error("Sales Order has no product lines.");
 
-    const availableByProduct = {};
-    inventorySnapshot().forEach(function (row) {
-      availableByProduct[row.product_id] = number_(availableByProduct[row.product_id], 0) + number_(row.available_qty, row.current_qty);
-    });
+    const physicalByProduct = salesPhysicalBaseByProductNoFifoV2_();
+    const committedByProduct = salesCommittedBaseByProductNoFifoV2_(salesOrderId);
+    const freeByProduct = salesFreeBaseByProductNoFifoV2_(physicalByProduct, committedByProduct);
     const requiredByProduct = {};
     detail.lines.forEach(function (line) {
       requiredByProduct[line.product_id] = number_(requiredByProduct[line.product_id], 0) + remainingBaseQtyV2_(line);
     });
     Object.keys(requiredByProduct).forEach(function (productId) {
-      if (requiredByProduct[productId] > number_(availableByProduct[productId], 0) + 0.0001) {
+      if (requiredByProduct[productId] > number_(freeByProduct[productId], 0) + 0.0001) {
         const product = readTable_("PRODUCTS").find(function (row) { return String(row.product_id) === String(productId); }) || {};
-        throw new Error((product.product_name || productId) + " no longer has enough available inventory to confirm this order.");
+        throw new Error((product.product_name || productId) + " no longer has enough uncommitted inventory to confirm this order.");
       }
     });
 
@@ -219,4 +215,57 @@ function confirmSalesOrderNoFifoV2(payload) {
     });
     return getSalesOrderDetail({ sales_order_id: salesOrderId });
   });
+}
+
+function salesPhysicalBaseByProductNoFifoV2_() {
+  const totals = {};
+  warehouseActiveLotsV2_().forEach(function (lot) {
+    if (String(lot.status || "ACTIVE").toUpperCase() === "HOLD") return;
+    const productId = String(lot.product_id || "");
+    if (!productId) return;
+    totals[productId] = number_(totals[productId], 0) + warehouseActiveLotQtyV2_(lot);
+  });
+  return totals;
+}
+
+function salesCommittedBaseByProductNoFifoV2_(excludeSalesOrderId) {
+  const orderById = byId_(readTable_("SALES_ORDERS"), "sales_order_id");
+  const activeStatuses = ["CONFIRMED", "PARTIAL", "PARTIALLY_PICKED", "PICKED", "PARTIALLY_SHIPPED"];
+  const totals = {};
+  readTable_("SALES_ORDER_LINES").forEach(function (line) {
+    const orderId = String(line.sales_order_id || "");
+    if (!orderId || orderId === String(excludeSalesOrderId || "")) return;
+    const order = orderById[orderId] || {};
+    if (String(order.order_source || "").toUpperCase() === "QUICKBOOKS_HISTORICAL") return;
+    if (activeStatuses.indexOf(String(order.status || "").toUpperCase()) < 0) return;
+    const lineStatus = String(line.line_status || "").toUpperCase();
+    if (["CANCELLED", "DELIVERED", "SHIPPED"].indexOf(lineStatus) >= 0) return;
+    const remaining = remainingBaseQtyV2_(line);
+    if (!(remaining > 0.0001)) return;
+    totals[line.product_id] = number_(totals[line.product_id], 0) + remaining;
+  });
+  return totals;
+}
+
+function salesFreeBaseByProductNoFifoV2_(physicalByProduct, committedByProduct) {
+  const result = {};
+  Object.keys(physicalByProduct || {}).forEach(function (productId) {
+    result[productId] = Math.max(0, number_(physicalByProduct[productId], 0) - number_(committedByProduct[productId], 0));
+  });
+  return result;
+}
+
+function salesInventoryValueByProductNoFifoV2_() {
+  const totals = {};
+  warehouseActiveLotsV2_().forEach(function (lot) {
+    if (String(lot.status || "ACTIVE").toUpperCase() === "HOLD") return;
+    const productId = String(lot.product_id || "");
+    if (!productId) return;
+    totals[productId] = number_(totals[productId], 0) + warehouseActiveLotQtyV2_(lot) * lotCostPerBaseUnitV2_(lot);
+  });
+  return totals;
+}
+
+function round2V2_(value) {
+  return Math.round(number_(value, 0) * 100) / 100;
 }
