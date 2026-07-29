@@ -3,12 +3,13 @@ import { getWarehouseCapabilities, listProductStorage, newOperationId, sendSales
 import { escapeHtml, formatQuantity, notice } from "../js/utils.js";
 import { render as renderLegacy } from "./sendProduct.js?v=login-repair1";
 
-const SENDABLE = new Set(["CONFIRMED", "PARTIALLY_PICKED", "PARTIAL"]);
+const SENDABLE = new Set(["CONFIRMED", "PARTIALLY_PICKED", "PARTIAL", "PICKED"]);
 let ctx;
 let orders = [];
 let detail = null;
 let storageByProduct = {};
 let busy = false;
+let pendingSend = null;
 
 export async function render(context) {
   ctx = context;
@@ -38,6 +39,7 @@ export async function render(context) {
 }
 
 async function loadOrder(orderId) {
+  pendingSend = null;
   if (!orderId) {
     detail = null;
     document.getElementById("sv2Workspace").innerHTML = `<p class="muted">Choose a confirmed Sales Order.</p>`;
@@ -87,7 +89,6 @@ function renderWorkspace() {
   const workspace = document.getElementById("sv2Workspace");
   if (!workspace || !detail) return;
   const groups = productGroups();
-  const totalOpen = groups.reduce((sum, group) => sum + group.remaining_base, 0);
   const order = detail.order || {};
   workspace.innerHTML = `
     <div class="send-v2-header">
@@ -111,32 +112,37 @@ function groupHtml(group) {
         <div class="send-group-actions"><button type="button" data-select-enough="${escapeHtml(group.product_id)}">Select enough</button><button type="button" data-select-all="${escapeHtml(group.product_id)}">Select all</button></div>
       </div>
       <div class="send-location-list">
-        ${storage.length ? storage.map((row, index) => storageRowHtml(group, row, index)).join("") : `<p class="muted">No active storage space currently contains this product.</p>`}
+        ${storage.length ? storage.map((row) => storageRowHtml(group, row)).join("") : `<p class="muted">No active storage space currently contains this product.</p>`}
       </div>
     </article>
   `;
 }
 
-function storageRowHtml(group, row, index) {
+function storageRowHtml(group, row) {
   const availablePurchase = number(row.purchase_qty);
   return `
     <label class="send-location-row" data-storage-row="${escapeHtml(group.product_id)}|${escapeHtml(row.internal_lot_id)}">
       <input type="checkbox" data-storage-check data-product-id="${escapeHtml(group.product_id)}" data-lot-id="${escapeHtml(row.internal_lot_id)}">
       <div class="send-location-main"><strong>${escapeHtml(row.location_id)}</strong><span>Lot ${escapeHtml(row.supplier_lot_number || row.internal_lot_id)}</span></div>
       <div class="send-location-available"><strong>${formatQuantity(availablePurchase)} ${escapeHtml(row.purchase_unit_type || "units")}</strong><span>${formatQuantity(row.base_qty)} LB available</span></div>
-      <label class="send-location-qty">Take<input type="number" min="0" max="${escapeHtml(String(availablePurchase))}" step="any" value="${escapeHtml(String(availablePurchase))}" data-storage-qty data-product-id="${escapeHtml(group.product_id)}" data-lot-id="${escapeHtml(row.internal_lot_id)}"></label>
+      <label class="send-location-qty">Take<input type="number" inputmode="decimal" min="0" max="${escapeHtml(String(availablePurchase))}" step="any" value="${escapeHtml(String(availablePurchase))}" data-storage-qty data-product-id="${escapeHtml(group.product_id)}" data-lot-id="${escapeHtml(row.internal_lot_id)}"></label>
     </label>
   `;
 }
 
 function bindWorkspaceEvents() {
   document.querySelectorAll("[data-storage-check], [data-storage-qty]").forEach((element) => {
-    element.addEventListener("input", updateSelectionSummary);
-    element.addEventListener("change", updateSelectionSummary);
+    element.addEventListener("input", selectionChanged);
+    element.addEventListener("change", selectionChanged);
   });
-  document.querySelectorAll("[data-select-enough]").forEach((button) => button.addEventListener("click", () => selectEnough(button.dataset.selectEnough)));
-  document.querySelectorAll("[data-select-all]").forEach((button) => button.addEventListener("click", () => selectAll(button.dataset.selectAll)));
+  document.querySelectorAll("[data-select-enough]").forEach((button) => button.addEventListener("click", () => { selectEnough(button.dataset.selectEnough); pendingSend = null; }));
+  document.querySelectorAll("[data-select-all]").forEach((button) => button.addEventListener("click", () => { selectAll(button.dataset.selectAll); pendingSend = null; }));
   document.getElementById("sv2Send")?.addEventListener("click", sendSelected);
+}
+
+function selectionChanged() {
+  pendingSend = null;
+  updateSelectionSummary();
 }
 
 function selectEnough(productId) {
@@ -179,17 +185,22 @@ function updateSelectionSummary() {
   const selected = selectedStorage();
   const button = document.getElementById("sv2Send");
   const summary = document.getElementById("sv2SelectedSummary");
-  if (button) button.disabled = busy || !selected.length;
-  if (summary) summary.textContent = selected.length ? `${selected.length} storage space${selected.length === 1 ? "" : "s"} selected.` : "Select storage spaces.";
+  const totalBase = selected.reduce((sum, item) => sum + item.base_qty, 0);
+  if (button) {
+    button.disabled = busy || !selected.length;
+    button.textContent = pendingSend ? "Retry send" : "Send selected";
+  }
+  if (summary) summary.textContent = selected.length ? `${selected.length} space${selected.length === 1 ? "" : "s"} · ${formatQuantity(totalBase)} LB selected` : "Select storage spaces.";
 }
 
-function buildSelections() {
+function buildSelections(batchOperationId) {
   const selected = selectedStorage();
   const lineQueues = {};
   productGroups().forEach((group) => {
     lineQueues[group.product_id] = group.lines.map((line) => ({ line, remaining: remainingBase(line) })).filter((item) => item.remaining > 0.0001);
   });
   const result = [];
+  let operationIndex = 0;
   selected.forEach(({ row, base_qty }) => {
     let available = base_qty;
     const queue = lineQueues[row.product_id] || [];
@@ -197,13 +208,14 @@ function buildSelections() {
       if (available <= 0.0001) break;
       if (item.remaining <= 0.0001) continue;
       const take = Math.min(available, item.remaining);
+      operationIndex += 1;
       result.push({
         sales_order_line_id: item.line.sales_order_line_id,
         internal_lot_id: row.internal_lot_id,
         location_id: row.location_id,
         base_qty: take,
         purchase_qty: row.unit_weight_lbs > 0 ? take / row.unit_weight_lbs : 0,
-        operation_id: newOperationId("SEND")
+        operation_id: `${batchOperationId}-${operationIndex}`
       });
       item.remaining -= take;
       available -= take;
@@ -212,30 +224,43 @@ function buildSelections() {
   return result;
 }
 
+function selectionSignature() {
+  return selectedStorage().map(({ row, purchase_qty }) => `${row.product_id}|${row.internal_lot_id}|${clean(purchase_qty)}`).sort().join(";");
+}
+
 async function sendSelected() {
   if (busy || !detail) return;
-  const selections = buildSelections();
-  if (!selections.length) return notice("Select inventory to send.");
+  const signature = selectionSignature();
+  if (!signature) return notice("Select inventory to send.");
+  if (!pendingSend || pendingSend.signature !== signature || pendingSend.sales_order_id !== detail.order.sales_order_id) {
+    const batchOperationId = newOperationId("SENDBATCH");
+    pendingSend = {
+      signature,
+      sales_order_id: detail.order.sales_order_id,
+      operation_id: batchOperationId,
+      selections: buildSelections(batchOperationId)
+    };
+  }
+  if (!pendingSend.selections.length) return notice("Selected inventory does not match a remaining order quantity.");
+
   busy = true;
   const button = document.getElementById("sv2Send");
   if (button) { button.disabled = true; button.textContent = "Sending…"; }
   try {
-    await sendSalesOrderSelections(ctx.user, {
-      sales_order_id: detail.order.sales_order_id,
-      selections,
-      operation_id: newOperationId("SENDBATCH")
-    });
-    notice(`${selections.length} inventory selection${selections.length === 1 ? "" : "s"} sent.`);
-    await loadOrder(detail.order.sales_order_id);
-    document.getElementById("sv2Order").value = detail.order.sales_order_id;
-  } catch (error) {
-    notice(error.message);
+    const orderId = detail.order.sales_order_id;
+    await sendSalesOrderSelections(ctx.user, pendingSend);
+    const sentCount = pendingSend.selections.length;
+    pendingSend = null;
+    notice(`${sentCount} inventory selection${sentCount === 1 ? "" : "s"} sent.`);
     busy = false;
+    await loadOrder(orderId);
+    const select = document.getElementById("sv2Order");
+    if (select) select.value = orderId;
+  } catch (error) {
+    busy = false;
+    notice(`${error.message} If the connection timed out, tap Retry send — the same operation IDs will be reused.`);
     updateSelectionSummary();
-    if (button) button.textContent = "Send selected";
-    return;
   }
-  busy = false;
 }
 
 function lineRemaining(line) { return Math.max(0, number(line.qty_remaining !== "" && line.qty_remaining !== undefined ? line.qty_remaining : number(line.qty_ordered) - number(line.qty_picked))); }
