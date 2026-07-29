@@ -17,7 +17,8 @@ function warehouseV2Api(payload) {
     getPackingActivity,
     recordPackingUsage,
     createSalesOrderNoFifoV2,
-    confirmSalesOrderNoFifoV2
+    confirmSalesOrderNoFifoV2,
+    listSalesProductAvailabilityNoFifoV2
   };
   if (!routes[operation]) throw new Error("Unknown warehouse operation: " + operation);
   const forwarded = { ...payload };
