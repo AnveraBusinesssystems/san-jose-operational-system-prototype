@@ -53,7 +53,7 @@ async function loadOrder(orderId) {
     storageByProduct = {};
     const productIds = Array.from(new Set(openLines().map((line) => String(line.product_id)).filter(Boolean)));
     await Promise.all(productIds.map(async (productId) => {
-      storageByProduct[productId] = await listProductStorage(productId);
+      storageByProduct[productId] = await listProductStorage(productId, orderId);
     }));
     renderWorkspace();
   } catch (error) {
@@ -112,7 +112,7 @@ function groupHtml(group) {
         <div class="send-group-actions"><button type="button" data-select-enough="${escapeHtml(group.product_id)}">Select enough</button><button type="button" data-select-all="${escapeHtml(group.product_id)}">Select all</button></div>
       </div>
       <div class="send-location-list">
-        ${storage.length ? storage.map((row) => storageRowHtml(group, row)).join("") : `<p class="muted">No active storage space currently contains this product.</p>`}
+        ${storage.length ? storage.map((row) => storageRowHtml(group, row)).join("") : `<p class="muted">No unprotected storage space currently contains this product.</p>`}
       </div>
     </article>
   `;
@@ -124,7 +124,7 @@ function storageRowHtml(group, row) {
     <label class="send-location-row" data-storage-row="${escapeHtml(group.product_id)}|${escapeHtml(row.internal_lot_id)}">
       <input type="checkbox" data-storage-check data-product-id="${escapeHtml(group.product_id)}" data-lot-id="${escapeHtml(row.internal_lot_id)}">
       <div class="send-location-main"><strong>${escapeHtml(row.location_id)}</strong><span>Lot ${escapeHtml(row.supplier_lot_number || row.internal_lot_id)}</span></div>
-      <div class="send-location-available"><strong>${formatQuantity(availablePurchase)} ${escapeHtml(row.purchase_unit_type || "units")}</strong><span>${formatQuantity(row.base_qty)} LB available</span></div>
+      <div class="send-location-available"><strong>${formatQuantity(availablePurchase)} ${escapeHtml(row.purchase_unit_type || "units")}</strong><span>${formatQuantity(row.base_qty)} LB available${number(row.reserved_by_other_orders_base) > 0 ? ` · ${formatQuantity(row.reserved_by_other_orders_base)} LB protected for other orders` : ""}</span></div>
       <label class="send-location-qty">Take<input type="number" inputmode="decimal" min="0" max="${escapeHtml(String(availablePurchase))}" step="any" value="${escapeHtml(String(availablePurchase))}" data-storage-qty data-product-id="${escapeHtml(group.product_id)}" data-lot-id="${escapeHtml(row.internal_lot_id)}"></label>
     </label>
   `;
