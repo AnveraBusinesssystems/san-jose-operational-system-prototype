@@ -1,1 +1,1 @@
-export { render } from "./receiving-simple.js?v=1";
+export { render } from "./receiving-v2.js?v=warehouse-v2";
