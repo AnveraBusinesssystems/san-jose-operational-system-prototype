@@ -1,4 +1,4 @@
-import { warmOperationalCache } from "./api-smooth1.js?v=rack-inventory4";
+import { warmOperationalCache } from "./api-smooth1.js?v=warehouse-v2-sales";
 import { getSession, signIn, signOut } from "./auth.js?v=rack-inventory1";
 import { renderNavigation, renderRoute, configureRouter, navigate } from "./router.js?v=rack-inventory1";
 import { allowedPages } from "./permissions.js?v=warehouse-v2";
@@ -8,7 +8,7 @@ import * as products from "../pages/products.js?v=login-repair1";
 import * as suppliers from "../pages/suppliers.js?v=login-repair1";
 import * as orders from "../pages/orders.js?v=login-repair1";
 import * as purchaseOrders from "../pages/purchaseOrders.js?v=login-repair1";
-import * as salesOrders from "../pages/salesOrdersProfessional.js?v=login-repair1";
+import * as salesOrders from "../pages/salesOrdersClean.js?v=warehouse-v2-sales";
 import * as receiving from "../pages/receiving.js?v=warehouse-v2";
 import * as inventory from "../pages/inventory.js?v=rack-inventory4";
 import * as packing from "../pages/packing.js?v=warehouse-v2";
