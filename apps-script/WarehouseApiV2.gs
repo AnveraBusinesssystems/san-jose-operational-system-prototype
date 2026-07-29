@@ -1,6 +1,6 @@
 // WarehouseApiV2.gs
 // Single Apps Script route entrypoint for the warehouse-v2 frontend.
-// Code.gs only needs to expose `warehouseV2Api` in its routes map.
+// Code.gs exposes only `warehouseV2Api` in its routes map.
 
 function warehouseV2Api(payload) {
   payload = payload || {};
@@ -15,7 +15,9 @@ function warehouseV2Api(payload) {
     sendSalesOrderSelectionsSafe,
     moveInventory,
     getPackingActivity,
-    recordPackingUsage
+    recordPackingUsage,
+    createSalesOrderNoFifoV2,
+    confirmSalesOrderNoFifoV2
   };
   if (!routes[operation]) throw new Error("Unknown warehouse operation: " + operation);
   const forwarded = { ...payload };
