@@ -60,8 +60,8 @@ export const startReceivingSession = (user, input) => call("startReceivingSessio
 export const getReceivingSession = (receivingId) => call("getReceivingSession", { receiving_id: receivingId });
 export const listOpenReceivingSessions = (user) => call("listOpenReceivingSessions", { user });
 export const placeReceivingInventory = (user, input) => call("placeReceivingInventory", { user, input });
-export const listProductStorage = (productId) => call("listProductStorage", { product_id: productId });
-export const sendSalesOrderSelections = (user, input) => call("sendSalesOrderSelections", { user, input });
+export const listProductStorage = (productId, salesOrderId = "") => call("listProductStorageSafe", { product_id: productId, sales_order_id: salesOrderId });
+export const sendSalesOrderSelections = (user, input) => call("sendSalesOrderSelectionsSafe", { user, input });
 export const moveInventory = (user, input) => call("moveInventory", { user, input });
 export const getPackingActivity = (date = "") => call("getPackingActivity", { date });
 export const recordPackingUsage = (user, input) => call("recordPackingUsage", { user, input });
