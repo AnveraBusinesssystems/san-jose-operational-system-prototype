@@ -15,6 +15,8 @@ let session = null;
 let selectedRack = "";
 let selectedLocation = "";
 let busy = false;
+let pendingStart = null;
+let pendingPlacement = null;
 
 export async function render(context) {
   ctx = context;
@@ -66,11 +68,12 @@ function pageHtml(openSessions) {
 
 function bindBaseEvents() {
   document.getElementById("rv2Po")?.addEventListener("change", async (event) => {
+    pendingStart = null;
     await loadPurchaseOrder(event.target.value);
   });
   ["rv2Line", "rv2Qty", "rv2Damaged", "rv2PerSpace", "rv2SupplierLot"].forEach((id) => {
-    document.getElementById(id)?.addEventListener("input", updatePlan);
-    document.getElementById(id)?.addEventListener("change", updatePlan);
+    document.getElementById(id)?.addEventListener("input", () => { pendingStart = null; updatePlan(); });
+    document.getElementById(id)?.addEventListener("change", () => { pendingStart = null; updatePlan(); });
   });
   document.getElementById("rv2Line")?.addEventListener("change", () => {
     selectedLine = detail?.lines?.find((line) => String(line.po_line_id) === document.getElementById("rv2Line").value) || null;
@@ -117,29 +120,40 @@ function updatePlan() {
   }
   const valid = Boolean(selectedLine && qty > 0 && damaged >= 0 && damaged < qty && perSpace > 0 && lot && unitWeight(selectedLine) > 0);
   const button = document.getElementById("rv2Start");
-  if (button) button.disabled = !valid || busy;
+  if (button) {
+    button.disabled = !valid || busy;
+    button.textContent = pendingStart ? "Retry start" : "Start placement";
+  }
+}
+
+function currentStartInput() {
+  return {
+    po_id: detail?.po?.po_id || "",
+    po_line_id: selectedLine?.po_line_id || "",
+    qty_received: number(document.getElementById("rv2Qty")?.value),
+    qty_damaged: number(document.getElementById("rv2Damaged")?.value),
+    cases_per_space: number(document.getElementById("rv2PerSpace")?.value),
+    supplier_lot_number: String(document.getElementById("rv2SupplierLot")?.value || "").trim(),
+    quality_status: "PASS",
+    source_screen: "RECEIVING_V2"
+  };
 }
 
 async function startSession() {
   if (busy || !selectedLine || !detail) return;
+  const input = currentStartInput();
+  const signature = JSON.stringify(input);
+  if (!pendingStart || pendingStart.signature !== signature) pendingStart = { signature, operation_id: newOperationId("RCVSTART") };
   busy = true;
   updatePlan();
   try {
-    session = await startReceivingSession(ctx.user, {
-      po_id: detail.po.po_id,
-      po_line_id: selectedLine.po_line_id,
-      qty_received: number(document.getElementById("rv2Qty").value),
-      qty_damaged: number(document.getElementById("rv2Damaged").value),
-      cases_per_space: number(document.getElementById("rv2PerSpace").value),
-      supplier_lot_number: document.getElementById("rv2SupplierLot").value.trim(),
-      quality_status: "PASS",
-      operation_id: newOperationId("RCVSTART"),
-      source_screen: "RECEIVING_V2"
-    });
+    session = await startReceivingSession(ctx.user, { ...input, operation_id: pendingStart.operation_id });
+    pendingStart = null;
+    pendingPlacement = null;
     selectedLocation = "";
     renderPlacement();
   } catch (error) {
-    notice(error.message);
+    notice(`${error.message} If the connection timed out, tap Retry start — the same operation ID will be reused.`);
   } finally {
     busy = false;
     updatePlan();
@@ -150,6 +164,7 @@ async function resumeSession(receivingId) {
   const next = await getReceivingSession(receivingId);
   if (!next) return;
   session = next;
+  pendingPlacement = null;
   const poId = session.receiving.po_id;
   detail = await getPurchaseOrderDetail(poId);
   selectedLine = detail?.lines?.find((line) => String(line.po_line_id) === String(session.receiving.po_line_id)) || null;
@@ -178,7 +193,7 @@ function renderPlacement() {
       <strong>${session.spaces_completed} / ${session.spaces_required}</strong>
     </div>
     <div class="receiving-progress"><span style="width:${Math.min(100, session.spaces_required ? session.spaces_completed / session.spaces_required * 100 : 0)}%"></span></div>
-    <div class="receiving-next-card"><span>Next placement</span><strong>${formatQuantity(session.next_qty)} ${escapeHtml(session.receiving.unit_type || "units")}</strong><small>${formatQuantity(session.remaining_qty)} remaining after completed placements</small></div>
+    <div class="receiving-next-card"><span>Next placement</span><strong>${formatQuantity(session.next_qty)} ${escapeHtml(session.receiving.unit_type || "units")}</strong><small>${formatQuantity(session.remaining_qty)} remaining before this placement</small></div>
     ${session.placements.length ? `<div class="receiving-placement-history">${historyHtml()}</div>` : ""}
     <div class="receiving-storage-picker">
       <div class="rack-picker-top"><button id="rv2PrevRack" type="button">‹</button><strong>${escapeHtml(selectedRack || "Racks")}</strong><button id="rv2NextRack" type="button">›</button></div>
@@ -187,7 +202,7 @@ function renderPlacement() {
       <div class="logical-location-row"><button type="button" data-rv2-location="FLOOR-1" class="${selectedLocation === "FLOOR-1" ? "selected" : ""}">Floor 1</button><button type="button" data-rv2-location="FLOOR-2" class="${selectedLocation === "FLOOR-2" ? "selected" : ""}">Floor 2</button></div>
     </div>
     <div class="receiving-selected-location">${selectedLocation ? `Selected: <strong>${escapeHtml(selectedLocation)}</strong>` : "Tap an available space."}</div>
-    <button id="rv2Place" class="primary" type="button" ${selectedLocation || busy ? "" : "disabled"}>${busy ? "Placing…" : `Place ${formatQuantity(session.next_qty)} ${escapeHtml(session.receiving.unit_type || "units")}`}</button>
+    <button id="rv2Place" class="primary" type="button" ${selectedLocation || busy ? "" : "disabled"}>${busy ? "Placing…" : pendingPlacement ? `Retry ${formatQuantity(session.next_qty)} ${escapeHtml(session.receiving.unit_type || "units")}` : `Place ${formatQuantity(session.next_qty)} ${escapeHtml(session.receiving.unit_type || "units")}`}</button>
     <button id="rv2CancelView" class="secondary" type="button">Back to receiving list</button>
   `;
   bindPlacementEvents();
@@ -197,11 +212,13 @@ function bindPlacementEvents() {
   document.querySelectorAll("[data-rv2-rack]").forEach((button) => button.addEventListener("click", () => {
     selectedRack = button.dataset.rv2Rack;
     selectedLocation = "";
+    pendingPlacement = null;
     renderPlacement();
   }));
   document.querySelectorAll("[data-rv2-location]").forEach((button) => button.addEventListener("click", () => {
     const id = button.dataset.rv2Location;
     if (!isAvailable(id)) return notice(`${id} is not available.`);
+    if (selectedLocation !== id) pendingPlacement = null;
     selectedLocation = id;
     renderPlacement();
   }));
@@ -220,27 +237,32 @@ function shiftRack(delta) {
   const index = Math.max(0, racks.indexOf(selectedRack));
   selectedRack = racks[(index + delta + racks.length) % racks.length];
   selectedLocation = "";
+  pendingPlacement = null;
   renderPlacement();
 }
 
 async function placeNext() {
   if (busy || !session || !selectedLocation) return;
+  const signature = `${session.receiving.receiving_id}|${selectedLocation}|${clean(session.next_qty)}`;
+  if (!pendingPlacement || pendingPlacement.signature !== signature) pendingPlacement = { signature, operation_id: newOperationId("RCVPLACE") };
   busy = true;
   renderPlacement();
   try {
+    const placedLocation = selectedLocation;
     session = await placeReceivingInventory(ctx.user, {
       receiving_id: session.receiving.receiving_id,
-      location_id: selectedLocation,
+      location_id: placedLocation,
       purchase_qty: session.next_qty,
-      operation_id: newOperationId("RCVPLACE"),
+      operation_id: pendingPlacement.operation_id,
       source_screen: "RECEIVING_V2"
     });
-    notice(`${selectedLocation} updated.`);
+    pendingPlacement = null;
+    notice(`${placedLocation} updated.`);
     selectedLocation = "";
     locations = await listLocations();
     renderPlacement();
   } catch (error) {
-    notice(error.message);
+    notice(`${error.message} If the connection timed out, tap Retry — the same operation ID will be reused.`);
   } finally {
     busy = false;
     renderPlacement();
@@ -248,37 +270,40 @@ async function placeNext() {
 }
 
 function rackNames() {
-  return Array.from(new Set(locations.filter((row) => String(row.location_type || "PALLET_RACK").toUpperCase() === "PALLET_RACK").map((row) => String(row.rack || row.location_id || "").split("-")[0]).filter(Boolean))).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  return Array.from(new Set(locations.filter((row) => String(row.location_type || "PALLET_RACK").toUpperCase() === "PALLET_RACK" && String(row.rack || "").trim()).map((row) => String(row.rack).trim())))
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
 }
 
 function rackGridHtml(rack) {
-  const cells = [];
-  LEVELS.forEach((level) => BINS.forEach((bin) => {
-    const location = locations.find((row) => String(row.rack || row.location_id || "").split("-")[0] === rack && String(row.level || "").toUpperCase() === level && String(row.bin || "").toUpperCase() === bin);
-    const id = location?.location_id || `${rack}-${level}-${bin}`;
-    const available = Boolean(location && isAvailable(id));
-    cells.push(`<button type="button" class="receiving-rack-cell ${available ? "available" : "occupied"} ${selectedLocation === id ? "selected" : ""}" data-rv2-location="${escapeHtml(id)}" ${available ? "" : "disabled"}><span>${escapeHtml(level)}-${escapeHtml(bin)}</span><strong>${available ? "Available" : "Occupied"}</strong></button>`);
-  }));
-  return `<div class="receiving-rack-grid">${cells.join("")}</div>`;
+  const rackRows = locations.filter((row) => String(row.rack || "") === String(rack));
+  return LEVELS.flatMap((level) => BINS.map((bin) => {
+    const location = rackRows.find((row) => normalizeLevel(row.level) === level && String(row.bin || "").toUpperCase() === bin);
+    if (!location) return `<button type="button" disabled><small>${level}-${bin}</small><strong>Not configured</strong></button>`;
+    const available = isAvailable(location.location_id);
+    const selected = selectedLocation === location.location_id;
+    return `<button type="button" data-rv2-location="${escapeHtml(location.location_id)}" class="${selected ? "selected" : ""}" ${available ? "" : "disabled"}><small>${escapeHtml(location.location_id)}</small><strong>${available ? "EMPTY" : "Occupied"}</strong></button>`;
+  })).join("");
+}
+
+function isAvailable(id) {
+  const row = locations.find((location) => String(location.location_id) === String(id));
+  if (!row) return false;
+  const type = String(row.location_type || "PALLET_RACK").toUpperCase();
+  const active = row.is_active === undefined || row.is_active === true || String(row.is_active).toUpperCase() === "TRUE";
+  const current = status(row.current_status || "AVAILABLE");
+  if (!active || ["BLOCKED", "MAINTENANCE", "INACTIVE"].includes(current)) return false;
+  if (["FLOOR_STORAGE", "PACKING_AREA"].includes(type)) return true;
+  if (row.can_add_inventory !== undefined) return row.can_add_inventory === true || String(row.can_add_inventory).toUpperCase() === "TRUE";
+  return !["UNAVAILABLE", "OCCUPIED", "FULL"].includes(current);
 }
 
 function historyHtml() {
-  return session.placements.map((row) => `<div><span>✓ ${escapeHtml(row.location_id)}</span><strong>${formatQuantity(number(row.purchase_qty))} ${escapeHtml(row.purchase_unit_type || session.receiving.unit_type || "units")}</strong></div>`).join("");
-}
-
-function isAvailable(locationId) {
-  const row = locations.find((item) => String(item.location_id) === String(locationId));
-  if (!row) return false;
-  const type = String(row.location_type || "").toUpperCase();
-  if (["FLOOR_STORAGE", "PACKING_AREA"].includes(type)) return String(row.current_status || "AVAILABLE").toUpperCase() !== "BLOCKED";
-  if (row.is_receivable !== undefined) return row.is_receivable === true || String(row.is_receivable).toUpperCase() === "TRUE";
-  const statusValue = String(row.current_status || "AVAILABLE").toUpperCase();
-  return !["BLOCKED", "UNAVAILABLE", "OCCUPIED", "FULL", "MAINTENANCE", "INACTIVE"].includes(statusValue);
+  return (session?.placements || []).map((placement) => `<div><strong>${escapeHtml(placement.location_id)}</strong><span>${formatQuantity(placement.purchase_qty)} ${escapeHtml(placement.purchase_unit_type || session.receiving.unit_type || "units")} · Lot ${escapeHtml(placement.supplier_lot_number || "")}</span></div>`).join("");
 }
 
 function lineRemaining(line) { return Math.max(0, number(line.qty_remaining !== "" && line.qty_remaining !== undefined ? line.qty_remaining : number(line.qty_ordered) - number(line.qty_received_total))); }
-function unitWeight(line) { return firstPositive(line.case_weight_lbs, line.units_per_purchase_unit, line.unit_weight_lbs, line.product?.units_per_purchase_unit, line.product?.case_weight_lbs); }
-function firstPositive(...values) { for (const value of values) { const parsed = Number(value); if (Number.isFinite(parsed) && parsed > 0) return parsed; } return 0; }
+function unitWeight(line) { return number(line?.case_weight_lbs || line?.units_per_purchase_unit || line?.unit_weight_lbs || 0); }
+function status(value) { return String(value || "").trim().toUpperCase().replace(/[\s-]+/g, "_"); }
+function normalizeLevel(value) { const match = String(value || "").match(/\d+/); return match ? `L${match[0]}` : ""; }
 function number(value) { const parsed = Number(value); return Number.isFinite(parsed) ? parsed : 0; }
 function clean(value) { return String(Math.round(number(value) * 10000) / 10000); }
-function status(value) { return String(value || "").trim().toUpperCase().replace(/[\s-]+/g, "_"); }
