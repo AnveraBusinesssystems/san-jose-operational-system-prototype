@@ -1,5 +1,5 @@
 import * as base from "./api.js?v=rack-inventory4";
-import { createSalesOrderReliable } from "./sales-order-api.js?v=1";
+import { confirmSalesOrderReliable, createSalesOrderReliable } from "./sales-order-api.js?v=warehouse-v2";
 import { GOOGLE_SCRIPT_WEB_APP_URL } from "./config.js?v=rack-inventory2";
 
 const READ_CACHE_TTL_MS = 45000;
@@ -85,6 +85,10 @@ export async function createSalesOrder(user, input) {
 }
 
 export async function salesOrderAction(user, salesOrderId, action) {
+  const token = String(action || "").trim().toUpperCase();
+  if (USES_APPS_SCRIPT && ["CONFIRM", "CONFIRMED"].includes(token)) {
+    return mutate(() => confirmSalesOrderReliable(user, salesOrderId));
+  }
   return mutate(() => base.salesOrderAction(user, salesOrderId, action));
 }
 
@@ -115,12 +119,8 @@ export async function matchAmazonPackageScan(scanValue) {
 async function cachedRead(name, args, load) {
   const key = `${name}:${JSON.stringify(args)}`;
   const cached = readCache.get(key);
-  if (cached && Date.now() - cached.savedAt < READ_CACHE_TTL_MS) {
-    return cached.value;
-  }
-  if (pendingReads.has(key)) {
-    return pendingReads.get(key);
-  }
+  if (cached && Date.now() - cached.savedAt < READ_CACHE_TTL_MS) return cached.value;
+  if (pendingReads.has(key)) return pendingReads.get(key);
 
   const request = load()
     .then((value) => {
