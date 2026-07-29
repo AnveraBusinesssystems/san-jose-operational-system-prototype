@@ -1,0 +1,85 @@
+name: Warehouse v2 checks
+
+on:
+  push:
+    branches:
+      - codex/professional-ui-refresh
+  pull_request:
+    branches:
+      - codex/professional-ui-refresh
+
+permissions:
+  contents: read
+
+jobs:
+  syntax-and-routing:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Check warehouse frontend module syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          files=(
+            frontend/js/app-smooth1.js
+            frontend/js/api-smooth1.js
+            frontend/js/sales-order-api.js
+            frontend/js/warehouse-v2-api.js
+            frontend/pages/receiving-v2.js
+            frontend/pages/sendProduct-v2.js
+            frontend/pages/packing.js
+            frontend/pages/salesOrdersClean.js
+          )
+          for file in "${files[@]}"; do
+            echo "Checking $file"
+            node --input-type=module --check < "$file"
+          done
+
+      - name: Check Apps Script as one global project
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat apps-script/*.gs > /tmp/san-jose-apps-script.js
+          node --check /tmp/san-jose-apps-script.js
+
+      - name: Verify warehouse route contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'warehouseV2Api' apps-script/Code.gs
+          for operation in \
+            getWarehouseCapabilities \
+            startReceivingSession \
+            getReceivingSession \
+            listOpenReceivingSessions \
+            placeReceivingInventory \
+            listProductStorageSafe \
+            sendSalesOrderSelectionsSafe \
+            moveInventory \
+            getPackingActivity \
+            recordPackingUsage \
+            createSalesOrderNoFifoV2 \
+            confirmSalesOrderNoFifoV2 \
+            listSalesProductAvailabilityNoFifoV2; do
+            grep -q "$operation" apps-script/WarehouseApiV2.gs || {
+              echo "Missing warehouse operation: $operation"
+              exit 1
+            }
+          done
+
+      - name: Verify mobile warehouse entry points
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'warehouse-v2.css' frontend/index.html
+          grep -q 'warehouse-v2-inline.css' frontend/index.html
+          grep -q 'salesOrdersClean.js' frontend/js/app-smooth1.js
+          grep -q 'packing' frontend/js/app-smooth1.js
+          grep -q 'Packing Area' frontend/pages/mobileHome.js
