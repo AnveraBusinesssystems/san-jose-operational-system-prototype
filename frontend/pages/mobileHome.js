@@ -1,4 +1,4 @@
-import { allowedPages } from "../js/permissions.js?v=rack-inventory1";
+import { allowedPages } from "../js/permissions.js?v=warehouse-v2";
 import { navigate } from "../js/router.js?v=send2";
 
 const GROUPS = [
@@ -34,6 +34,7 @@ const GROUPS = [
     icon: "inventory",
     pages: [
       ["inventory", "Rack Inventory"],
+      ["packing", "Packing Area"],
       ["scanner", "Scanner"],
       ["products", "Products"]
     ]
