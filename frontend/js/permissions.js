@@ -16,6 +16,7 @@ const permissions = {
     "sendProduct:view",
     "receiving:view", "receiving:create",
     "inventory:view", "inventory:adjust",
+    "packing:view", "packing:usage",
     "scanner:test",
     "amazon:view",
     "reports:view",
@@ -27,6 +28,7 @@ const permissions = {
     "sendProduct:view",
     "receiving:view", "receiving:create",
     "inventory:view",
+    "packing:view", "packing:usage",
     "scanner:test"
   ],
   OPERATOR: [
@@ -35,6 +37,7 @@ const permissions = {
     "sendProduct:view",
     "receiving:view", "receiving:create",
     "inventory:view",
+    "packing:view",
     "scanner:test"
   ]
 };
@@ -72,6 +75,7 @@ export function allowedPages(user) {
     { id: "sendProduct", label: "Send Product", permission: "sendProduct:view" },
     { id: "receiving", label: "Receive Product", permission: "receiving:view" },
     { id: "inventory", label: "Rack Inventory", permission: "inventory:view" },
+    { id: "packing", label: "Packing Area", permission: "packing:view" },
     { id: "scanner", label: "Scanner Test", permission: "scanner:test" },
     { id: "amazon", label: "Amazon Outbound", permission: "amazon:view" },
     { id: "reports", label: "Reports", permission: "reports:view" },
