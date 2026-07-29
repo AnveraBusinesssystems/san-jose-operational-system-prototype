@@ -1,0 +1,46 @@
+name: Patch Warehouse V2 Router
+
+on:
+  push:
+    branches:
+      - codex/professional-ui-refresh
+    paths:
+      - .github/workflows/patch-warehouse-v2-router.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-router:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/professional-ui-refresh
+      - name: Add Warehouse V2 route
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('apps-script/Code.gs')
+          text = path.read_text()
+          if '      warehouseV2Api\n' not in text and '      warehouseV2Api,\n' not in text:
+              old = '      matchAmazonPackageScan,\n      validateOperationalSchema\n    };'
+              new = '      matchAmazonPackageScan,\n      validateOperationalSchema,\n      warehouseV2Api\n    };'
+              if old not in text:
+                  raise SystemExit('Expected Apps Script route block was not found.')
+              text = text.replace(old, new, 1)
+              path.write_text(text)
+          PY
+      - name: Remove one-time workflow
+        run: rm .github/workflows/patch-warehouse-v2-router.yml
+      - name: Commit router patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps-script/Code.gs .github/workflows/patch-warehouse-v2-router.yml
+          if git diff --cached --quiet; then
+            echo "Nothing to commit"
+          else
+            git commit -m "Wire Warehouse V2 Apps Script router"
+            git push origin HEAD:codex/professional-ui-refresh
+          fi
