@@ -1,8 +1,9 @@
 import { render as renderProfessional } from "./salesOrdersProfessional.js?v=warehouse-v2";
-import { createSalesOrder, inventorySnapshot, listProducts, listSuppliers } from "../js/api-smooth1.js?v=warehouse-v2";
+import { createSalesOrder, listSuppliers } from "../js/api-smooth1.js?v=warehouse-v2-sales";
+import { listSalesProductAvailability } from "../js/warehouse-v2-api.js?v=warehouse-v2-sales";
 import { escapeHtml, formatMoney, notice } from "../js/utils.js?v=filters1";
 
-const SALES_UNITS = ["CASE", "BAG", "BOX", "LB", "EACH", "PALLET"];
+const SALES_UNITS = ["CASE", "BAG", "BOX", "UNIT", "EACH", "LB", "PALLET"];
 const SALES_CHANNELS = ["BULK", "AMAZON", "RETAIL", "DISTRIBUTOR", "OTHER"];
 const SHIP_METHODS = ["CUSTOMER_PICKUP", "SAN_JOSE_DELIVERY", "LTL_FREIGHT", "PARCEL", "AMAZON_FBA", "OTHER"];
 let lineCounter = 0;
@@ -11,9 +12,9 @@ export async function render(ctx) {
   await renderProfessional(ctx);
   if (normalizeRole(ctx.user?.role) !== "ADMIN") return;
 
-  const [parties, products, snapshot] = await Promise.all([listSuppliers(), listProducts(), inventorySnapshot()]);
+  const [parties, availability] = await Promise.all([listSuppliers(), listSalesProductAvailability()]);
   const customers = parties.filter((row) => isActive(row) && String(row.party_type || "").toUpperCase() === "CUSTOMER");
-  const productChoices = buildProductChoices(products, snapshot);
+  const productChoices = (availability || []).filter((row) => number(row.free_base_qty) > 0.0001);
   replaceLegacyBuilder(ctx, customers, productChoices);
   ctx.setTitle("Sales Orders", "Create customer requirements; warehouse chooses the actual storage spaces when sending");
 }
@@ -25,7 +26,7 @@ function replaceLegacyBuilder(ctx, customers, productChoices) {
   section.className = "panel po-builder sales-order-builder sales-order-builder-v2";
   section.innerHTML = `
     <div class="panel-header">
-      <div><p class="eyebrow">NEW SALES ORDER</p><h2>Create Sales Order</h2><p class="muted">Enter what the customer bought. Do not choose a lot or rack space here.</p></div>
+      <div><p class="eyebrow">NEW SALES ORDER</p><h2>Create Sales Order</h2><p class="muted">Enter what the customer bought. The warehouse chooses the lot and space later.</p></div>
       <span class="status-pill">No FIFO</span>
     </div>
     <form id="salesOrderFormV2">
@@ -41,7 +42,7 @@ function replaceLegacyBuilder(ctx, customers, productChoices) {
         <div class="field"><label>Tax Rate</label><div class="input-suffix"><input name="tax_rate_percent" type="number" min="0" step="0.01" value="6.25" disabled><span>%</span></div></div>
         <div class="field full"><label>Notes</label><textarea name="notes"></textarea></div>
       </div>
-      <div class="po-lines-heading"><div><h3>Products Ordered</h3><p class="muted">Available inventory is checked by product. The warehouse chooses spaces later.</p></div><button id="addSalesLineV2" class="btn secondary" type="button">Add Product</button></div>
+      <div class="po-lines-heading"><div><h3>Products Ordered</h3><p class="muted">Free stock already subtracts product quantity committed to other confirmed orders.</p></div><button id="addSalesLineV2" class="btn secondary" type="button">Add Product</button></div>
       <div id="salesLineItemsV2" class="sales-v2-builder-lines"></div>
       <div class="po-footer sales-order-footer"><div class="po-totals"><div><span>Subtotal</span><strong id="salesSubtotalV2">$0.00</strong></div><div><span>Tax</span><strong id="salesTaxV2">$0.00</strong></div><div class="po-grand-total"><span>Total</span><strong id="salesTotalV2">$0.00</strong></div></div><button id="createSalesOrderV2" class="btn" type="submit" ${productChoices.length ? "" : "disabled"}>Create Sales Order</button></div>
     </form>`;
@@ -88,7 +89,7 @@ function replaceLegacyBuilder(ctx, customers, productChoices) {
     const button = section.querySelector("#createSalesOrderV2");
     if (button.disabled) return;
     try {
-      const input = collectOrder(form, customerMap);
+      const input = collectOrder(form, customerMap, productMap);
       button.disabled = true;
       button.textContent = "Creating…";
       const result = await createSalesOrder(ctx.user, input);
@@ -107,7 +108,7 @@ function addLine(container, products) {
   container.insertAdjacentHTML("beforeend", `
     <section class="sales-v2-builder-line" data-sales-v2-line="${lineCounter}">
       <div class="sales-v2-line-main">
-        <label>Product<select data-sales-product required><option value="">Select product</option>${products.map((product) => `<option value="${escapeHtml(product.product_id)}">${escapeHtml(product.product_name)} · ${formatNumber(product.available_base)} LB available</option>`).join("")}</select></label>
+        <label>Product<select data-sales-product required><option value="">Select product</option>${products.map((product) => `<option value="${escapeHtml(product.product_id)}">${escapeHtml(product.product_name)} · ${formatNumber(product.free_base_qty)} LB free</option>`).join("")}</select></label>
         <label>Quantity<input data-sales-qty type="number" inputmode="decimal" min="0.01" step="any" value="1" required></label>
         <label>Sales Unit<select data-sales-unit>${SALES_UNITS.map((unit) => `<option>${unit}</option>`).join("")}</select></label>
         <label>LB / Unit<input data-sales-weight type="number" inputmode="decimal" min="0.01" step="any" value="1" required></label>
@@ -120,9 +121,13 @@ function addLine(container, products) {
 
 function applyProduct(row, product) {
   if (!product) return;
-  row.querySelector("[data-sales-unit]").value = product.default_unit;
-  row.querySelector("[data-sales-weight]").value = formatNumber(product.default_weight || 1);
-  updateLine(row, new Map([[product.product_id, product]]));
+  const unitSelect = row.querySelector("[data-sales-unit]");
+  const defaultUnit = String(product.default_sales_unit || "CASE").toUpperCase();
+  if (![...unitSelect.options].some((option) => option.value === defaultUnit)) {
+    unitSelect.add(new Option(defaultUnit, defaultUnit));
+  }
+  unitSelect.value = defaultUnit;
+  row.querySelector("[data-sales-weight]").value = formatNumber(number(product.default_unit_weight_lbs) || 1);
 }
 
 function updateLine(row, productMap) {
@@ -133,8 +138,9 @@ function updateLine(row, productMap) {
   const price = number(row.querySelector("[data-sales-price]")?.value);
   const required = qty * weight;
   const availability = row.querySelector("[data-sales-availability]");
-  if (product) availability.textContent = `${formatNumber(required)} LB required · ${formatNumber(product.available_base)} LB currently available${required > product.available_base + .0001 ? " · SHORT" : ""}`;
-  else availability.textContent = "Choose a product.";
+  if (product) {
+    availability.textContent = `${formatNumber(required)} LB required · ${formatNumber(product.free_base_qty)} LB free${number(product.committed_base_qty) > 0 ? ` · ${formatNumber(product.committed_base_qty)} LB committed` : ""}${required > number(product.free_base_qty) + .0001 ? " · SHORT" : ""}`;
+  } else availability.textContent = "Choose a product.";
   row.querySelector("[data-sales-line-total]").textContent = formatMoney(qty * price);
 }
 
@@ -147,9 +153,10 @@ function updateTotals(form) {
   form.querySelector("#salesTotalV2").textContent = formatMoney(subtotal + tax);
 }
 
-function collectOrder(form, customerMap) {
+function collectOrder(form, customerMap, productMap) {
   const customer = customerMap.get(String(form.elements.customer_id.value));
   if (!customer) throw new Error("Select a customer.");
+  const usedByProduct = new Map();
   const lines = Array.from(form.querySelectorAll("[data-sales-v2-line]")).map((row, index) => {
     const productId = String(row.querySelector("[data-sales-product]").value || "");
     const qty = number(row.querySelector("[data-sales-qty]").value);
@@ -157,6 +164,11 @@ function collectOrder(form, customerMap) {
     const weight = unit === "LB" ? 1 : number(row.querySelector("[data-sales-weight]").value);
     const price = number(row.querySelector("[data-sales-price]").value);
     if (!productId || qty <= 0 || weight <= 0) throw new Error(`Complete product, quantity, and weight on line ${index + 1}.`);
+    const required = qty * weight;
+    const totalRequired = number(usedByProduct.get(productId)) + required;
+    usedByProduct.set(productId, totalRequired);
+    const product = productMap.get(productId);
+    if (product && totalRequired > number(product.free_base_qty) + .0001) throw new Error(`${product.product_name} exceeds free inventory by ${formatNumber(totalRequired - number(product.free_base_qty))} LB.`);
     return { product_id: productId, qty_ordered: qty, unit_type: unit, unit_weight_lbs: weight, unit_price: price };
   });
   return {
@@ -180,27 +192,6 @@ function collectOrder(form, customerMap) {
   };
 }
 
-function buildProductChoices(products, snapshot) {
-  const productMap = new Map(products.map((product) => [String(product.product_id), product]));
-  const grouped = new Map();
-  (snapshot || []).forEach((row) => {
-    const productId = String(row.product_id || "");
-    if (!productId) return;
-    const available = number(row.available_qty !== undefined ? row.available_qty : row.current_qty);
-    if (available <= .0001) return;
-    if (!grouped.has(productId)) grouped.set(productId, { product_id: productId, available_base: 0, default_weight: 0, default_unit: "CASE" });
-    const result = grouped.get(productId);
-    result.available_base += available;
-    if (!(result.default_weight > 0)) result.default_weight = positive(row.lbs_per_purchase_unit, row.unit_weight_lbs, row.purchase_unit_weight, row.case_weight_lbs);
-    if (result.default_unit === "CASE" && row.purchase_unit_type) result.default_unit = String(row.purchase_unit_type).toUpperCase();
-  });
-  return Array.from(grouped.values()).map((row) => {
-    const product = productMap.get(row.product_id) || {};
-    const weight = row.default_weight || positive(product.case_weight_lbs, product.units_per_purchase_unit) || 1;
-    return { ...row, product_name: product.product_name || row.product_id, default_weight: weight, default_unit: row.default_unit || product.default_unit || "CASE" };
-  }).sort((a, b) => a.product_name.localeCompare(b.product_name, undefined, { sensitivity: "base" }));
-}
-
 function ensureStyles() {
   if (document.getElementById("salesOrdersV2BuilderStyles")) return;
   const style = document.createElement("style");
@@ -214,7 +205,6 @@ function ensureStyles() {
 
 function normalizeRole(role) { const value = String(role || "OPERATOR").toUpperCase(); return value === "OWNER" ? "ADMIN" : value; }
 function isActive(row) { return row.is_active === undefined || row.is_active === true || String(row.is_active).toUpperCase() === "TRUE"; }
-function positive(...values) { for (const value of values) { const n = Number(value); if (Number.isFinite(n) && n > 0) return n; } return 0; }
 function number(value) { const n = Number(value); return Number.isFinite(n) ? n : 0; }
 function formatNumber(value) { return String(Math.round(number(value) * 100) / 100); }
 function localToday() { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }
