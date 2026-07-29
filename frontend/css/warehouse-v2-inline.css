@@ -1,0 +1,73 @@
+.packing-inline-field {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  color: #55645b;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.packing-inline-field > span {
+  display: block;
+}
+
+.packing-inline-field input {
+  width: 100%;
+  min-height: 44px !important;
+}
+
+.packing-inline-actions {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.packing-return-controls,
+.packing-usage-controls {
+  display: grid;
+  grid-template-columns: 92px minmax(150px, 1fr) auto;
+  gap: 7px;
+  align-items: end;
+}
+
+.packing-usage-controls {
+  grid-template-columns: minmax(92px, 120px) auto;
+  justify-content: end;
+}
+
+.packing-return-controls button,
+.packing-usage-controls button,
+.packing-source-row button {
+  min-height: 44px !important;
+}
+
+@media (max-width: 700px) {
+  .packing-current-row {
+    gap: 12px !important;
+  }
+
+  .packing-inline-actions,
+  .packing-return-controls,
+  .packing-usage-controls {
+    width: 100%;
+  }
+
+  .packing-return-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .packing-usage-controls {
+    grid-template-columns: 1fr;
+    justify-content: stretch;
+  }
+
+  .packing-return-controls button,
+  .packing-usage-controls button {
+    width: 100%;
+    min-height: 48px !important;
+  }
+
+  .packing-destination-field input {
+    font-size: 16px;
+  }
+}
