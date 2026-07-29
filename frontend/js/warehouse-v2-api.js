@@ -66,3 +66,4 @@ export const sendSalesOrderSelections = (user, input) => call("sendSalesOrderSel
 export const moveInventory = (user, input) => call("moveInventory", { user, input });
 export const getPackingActivity = (date = "") => call("getPackingActivity", { date });
 export const recordPackingUsage = (user, input) => call("recordPackingUsage", { user, input });
+export const listSalesProductAvailability = () => call("listSalesProductAvailabilityNoFifoV2");
