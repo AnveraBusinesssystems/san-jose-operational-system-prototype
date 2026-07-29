@@ -106,8 +106,8 @@ function warehouseAppendMovementV2_(user, input) {
     purchase_unit_type: input.purchase_unit_type || "",
     source_screen: input.source_screen || "WAREHOUSE_V2"
   };
-  appendRecord_("INVENTORY_MOVEMENTS", movement);
-  return movement;
+  const writeInfo = appendRecord_("INVENTORY_MOVEMENTS", movement);
+  return { ...movement, _write_info: writeInfo };
 }
 
 function startReceivingSession(payload) {
@@ -313,7 +313,7 @@ function placeReceivingInventory(payload) {
     try {
       writes.push(appendRecord_("LOTS", lot));
       writes.push(appendRecord_("RECEIVING_PLACEMENTS", placement));
-      warehouseAppendMovementV2_(user, {
+      const movement = warehouseAppendMovementV2_(user, {
         movement_type: "RECEIVE",
         product_id: receiving.product_id,
         internal_lot_id: lotId,
@@ -329,6 +329,7 @@ function placeReceivingInventory(payload) {
         source_screen: "RECEIVING_V2",
         notes: `Placed ${purchaseQty} ${receiving.unit_type} in ${locationId}.`
       });
+      if (movement._write_info) writes.push(movement._write_info);
 
       const previousReceived = number_(poLine.qty_received_total, 0);
       const ordered = number_(poLine.qty_ordered, 0);
@@ -508,45 +509,60 @@ function moveInventory(payload) {
     const type = String(destination.location_type || "").toUpperCase();
     const movementType = type === "PACKING_AREA" ? "PACKING_IN" : String(fromLocation).toUpperCase() === "PACKING" ? "PACKING_OUT" : "TRANSFER";
     let destinationLotId = lot.internal_lot_id;
+    let splitWrite = null;
+    const originalState = {
+      current_qty_script: currentBase,
+      current_location_id: fromLocation,
+      status: lot.status || "ACTIVE",
+      updated_at: lot.updated_at || ""
+    };
 
-    if (approximatelyEqual_(qtyToMove, currentBase, 0.0001)) {
-      updateTableRecord_("LOTS", "internal_lot_id", lot.internal_lot_id, { current_location_id: toLocation, updated_at: today_() });
-    } else {
-      const remaining = currentBase - qtyToMove;
-      updateTableRecord_("LOTS", "internal_lot_id", lot.internal_lot_id, { current_qty_script: remaining, updated_at: today_() });
-      destinationLotId = nextId_("LOTS", "internal_lot_id", "LOT");
-      appendRecord_("LOTS", {
-        ...lot,
+    try {
+      if (approximatelyEqual_(qtyToMove, currentBase, 0.0001)) {
+        updateTableRecord_("LOTS", "internal_lot_id", lot.internal_lot_id, { current_location_id: toLocation, updated_at: today_() });
+      } else {
+        const remaining = currentBase - qtyToMove;
+        updateTableRecord_("LOTS", "internal_lot_id", lot.internal_lot_id, { current_qty_script: remaining, updated_at: today_() });
+        destinationLotId = nextId_("LOTS", "internal_lot_id", "LOT");
+        splitWrite = appendRecord_("LOTS", {
+          ...lot,
+          internal_lot_id: destinationLotId,
+          original_qty: qtyToMove,
+          current_qty_script: qtyToMove,
+          current_location_id: toLocation,
+          qr_value: destinationLotId,
+          created_at: today_(),
+          updated_at: today_(),
+          notes: `Split from ${lot.internal_lot_id} for transfer to ${toLocation}.`,
+          purchase_qty_received: movedPurchaseQty,
+          pallet_count: 1
+        });
+      }
+
+      const movement = warehouseAppendMovementV2_(user, {
+        movement_type: movementType,
+        product_id: lot.product_id,
         internal_lot_id: destinationLotId,
-        original_qty: qtyToMove,
-        current_qty_script: qtyToMove,
-        current_location_id: toLocation,
-        qr_value: destinationLotId,
-        created_at: today_(),
-        updated_at: today_(),
-        notes: `Split from ${lot.internal_lot_id} for transfer to ${toLocation}.`,
-        purchase_qty_received: movedPurchaseQty,
-        pallet_count: 1
+        qty_change: qtyToMove,
+        unit_type: lot.unit_type || "LB",
+        from_location_id: fromLocation,
+        to_location_id: toLocation,
+        operation_id: operationId,
+        purchase_qty_change: movedPurchaseQty,
+        purchase_unit_type: lot.purchase_unit_type || "",
+        source_screen: input.source_screen || (type === "PACKING_AREA" || fromLocation === "PACKING" ? "PACKING" : "MOVE_INVENTORY"),
+        notes: input.notes || `Moved ${movedPurchaseQty} ${lot.purchase_unit_type || "units"} from ${fromLocation} to ${toLocation}.`
       });
+      syncLocationInventoryStatus_(fromLocation);
+      syncLocationInventoryStatus_(toLocation);
+      return { movement, source_lot_id: lot.internal_lot_id, destination_lot_id: destinationLotId, from_location_id: fromLocation, to_location_id: toLocation };
+    } catch (error) {
+      updateTableRecord_("LOTS", "internal_lot_id", lot.internal_lot_id, originalState);
+      if (splitWrite) rollbackAppendedRange_(splitWrite);
+      syncLocationInventoryStatus_(fromLocation);
+      syncLocationInventoryStatus_(toLocation);
+      throw error;
     }
-
-    const movement = warehouseAppendMovementV2_(user, {
-      movement_type: movementType,
-      product_id: lot.product_id,
-      internal_lot_id: destinationLotId,
-      qty_change: qtyToMove,
-      unit_type: lot.unit_type || "LB",
-      from_location_id: fromLocation,
-      to_location_id: toLocation,
-      operation_id: operationId,
-      purchase_qty_change: movedPurchaseQty,
-      purchase_unit_type: lot.purchase_unit_type || "",
-      source_screen: input.source_screen || (type === "PACKING_AREA" || fromLocation === "PACKING" ? "PACKING" : "MOVE_INVENTORY"),
-      notes: input.notes || `Moved ${movedPurchaseQty} ${lot.purchase_unit_type || "units"} from ${fromLocation} to ${toLocation}.`
-    });
-    syncLocationInventoryStatus_(fromLocation);
-    syncLocationInventoryStatus_(toLocation);
-    return { movement, source_lot_id: lot.internal_lot_id, destination_lot_id: destinationLotId, from_location_id: fromLocation, to_location_id: toLocation };
   });
 }
 
@@ -615,22 +631,29 @@ function recordPackingUsage(payload) {
     const current = warehouseActiveLotQtyV2_(lot);
     if (baseQty > current + 0.0001) throw new Error("Usage quantity exceeds inventory currently in Packing.");
     const next = Math.max(0, current - baseQty);
-    updateTableRecord_("LOTS", "internal_lot_id", lot.internal_lot_id, { current_qty_script: next, status: next <= 0.0001 ? "EMPTY" : lot.status || "ACTIVE", updated_at: today_() });
-    const movement = warehouseAppendMovementV2_(user, {
-      movement_type: "PACKING_USAGE",
-      product_id: lot.product_id,
-      internal_lot_id: lot.internal_lot_id,
-      qty_change: -baseQty,
-      unit_type: lot.unit_type || "LB",
-      from_location_id: "PACKING",
-      to_location_id: "OUTBOUND",
-      operation_id: operationId,
-      purchase_qty_change: -(purchaseQty || (unitWeight > 0 ? baseQty / unitWeight : 0)),
-      purchase_unit_type: lot.purchase_unit_type || "",
-      source_screen: "PACKING",
-      notes: input.notes || "End-of-day packing usage."
-    });
-    syncLocationInventoryStatus_("PACKING");
-    return { movement, remaining_base_qty: next };
+    const originalState = { current_qty_script: current, status: lot.status || "ACTIVE", updated_at: lot.updated_at || "" };
+    try {
+      updateTableRecord_("LOTS", "internal_lot_id", lot.internal_lot_id, { current_qty_script: next, status: next <= 0.0001 ? "EMPTY" : lot.status || "ACTIVE", updated_at: today_() });
+      const movement = warehouseAppendMovementV2_(user, {
+        movement_type: "PACKING_USAGE",
+        product_id: lot.product_id,
+        internal_lot_id: lot.internal_lot_id,
+        qty_change: -baseQty,
+        unit_type: lot.unit_type || "LB",
+        from_location_id: "PACKING",
+        to_location_id: "OUTBOUND",
+        operation_id: operationId,
+        purchase_qty_change: -(purchaseQty || (unitWeight > 0 ? baseQty / unitWeight : 0)),
+        purchase_unit_type: lot.purchase_unit_type || "",
+        source_screen: "PACKING",
+        notes: input.notes || "Packing usage."
+      });
+      syncLocationInventoryStatus_("PACKING");
+      return { movement, remaining_base_qty: next };
+    } catch (error) {
+      updateTableRecord_("LOTS", "internal_lot_id", lot.internal_lot_id, originalState);
+      syncLocationInventoryStatus_("PACKING");
+      throw error;
+    }
   });
 }
