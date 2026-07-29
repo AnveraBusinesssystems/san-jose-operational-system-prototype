@@ -44,9 +44,10 @@ const CORE_SCHEMA = {
   LOCATIONS: ["location_id", "zone", "aisle", "rack", "level", "bin", "location_type", "capacity_units", "capacity_weight_lbs", "current_status", "allowed_categories", "priority_rank", "is_active", "qr_value", "notes"],
   PURCHASE_ORDERS: ["po_id", "po_status", "supplier_id", "created_by", "order_date", "expected_delivery_date", "actual_first_received_date", "actual_completed_date", "payment_terms", "currency", "subtotal_amount", "tax_amount", "shipping_amount", "total_amount", "recommendation_id", "po_doc_url", "po_pdf_url", "email_status", "email_sent_at", "printed_status", "printed_at", "supplier_confirmation_status", "supplier_confirmed_delivery_date", "notes", "tax_enabled", "tax_rate", "ship_via", "quickbooks_bill_id", "bill_status", "bill_created_at"],
   PURCHASE_ORDER_LINES: ["po_line_id", "po_id", "supplier_id", "product_id", "line_status", "qty_ordered", "qty_received_total", "qty_remaining", "unit_type", "unit_cost", "currency", "line_total", "supplier_expected_lot_number", "notes", "base_unit", "units_per_purchase_unit", "expected_base_qty", "case_weight_lbs", "qr_value"],
-  RECEIVING: ["receiving_id", "po_id", "po_line_id", "supplier_id", "product_id", "scan_code", "internal_lot_id", "supplier_lot_number", "received_date", "received_by", "qty_received", "qty_damaged", "qty_accepted", "unit_type", "quality_score", "product_accuracy_score", "over_under_status", "recommended_location_id", "confirmed_location_id", "requires_supervisor_approval", "approval_status", "notes", "base_unit", "units_per_purchase_unit", "qty_accepted_base", "pallet_count", "quality_status"],
+  RECEIVING: ["receiving_id", "po_id", "po_line_id", "supplier_id", "product_id", "scan_code", "internal_lot_id", "supplier_lot_number", "received_date", "received_by", "qty_received", "qty_damaged", "qty_accepted", "unit_type", "quality_score", "product_accuracy_score", "over_under_status", "recommended_location_id", "confirmed_location_id", "requires_supervisor_approval", "approval_status", "notes", "base_unit", "units_per_purchase_unit", "qty_accepted_base", "pallet_count", "quality_status", "cases_per_space", "spaces_required", "spaces_completed", "receiving_status", "operation_id", "updated_at"],
+  RECEIVING_PLACEMENTS: ["placement_id", "receiving_id", "po_id", "po_line_id", "product_id", "internal_lot_id", "supplier_lot_number", "location_id", "purchase_qty", "purchase_unit_type", "unit_weight_lbs", "base_qty", "operation_id", "placed_by", "placed_at", "notes"],
   LOTS: ["internal_lot_id", "product_id", "supplier_id", "supplier_lot_number", "po_id", "po_line_id", "received_date", "original_qty", "current_qty_script", "unit_type", "unit_cost", "currency", "current_location_id", "status", "expiration_date", "qr_value", "label_printed_status", "label_printed_at", "created_at", "updated_at", "notes", "purchase_qty_received", "purchase_unit_type", "pallet_count"],
-  INVENTORY_MOVEMENTS: ["movement_id", "movement_type", "timestamp", "user_id", "product_id", "internal_lot_id", "package_id", "qty_change", "unit_type", "from_location_id", "to_location_id", "related_po_id", "related_receiving_id", "related_sales_order_id", "related_pick_task_id", "related_amazon_order_id", "scan_code", "device_id", "approval_status", "notes"],
+  INVENTORY_MOVEMENTS: ["movement_id", "movement_type", "timestamp", "user_id", "product_id", "internal_lot_id", "package_id", "qty_change", "unit_type", "from_location_id", "to_location_id", "related_po_id", "related_receiving_id", "related_sales_order_id", "related_pick_task_id", "related_amazon_order_id", "scan_code", "device_id", "approval_status", "notes", "operation_id", "purchase_qty_change", "purchase_unit_type", "source_screen"],
   ADJUSTMENTS: ["adjustment_id", "created_at", "created_by", "product_id", "internal_lot_id", "location_id", "qty_adjustment", "unit_type", "reason_code", "approval_status", "approved_by", "approved_at", "related_movement_id", "notes"],
   SALES_ORDERS: ["sales_order_id", "channel", "order_source", "customer_name", "customer_email", "customer_phone", "amazon_order_id", "order_date", "ship_by_date", "status", "currency", "subtotal_amount", "tax_amount", "shipping_amount", "total_amount", "invoice_status", "quickbooks_invoice_id", "created_by", "created_at", "updated_at", "notes", "customer_id", "ship_method", "payment_terms", "tax_enabled", "tax_rate", "estimated_gross_profit", "estimated_gross_margin_percent", "confirmed_at", "picked_at", "shipped_at", "delivered_at", "delivered_by", "delivery_notes", "bl_folio", "shipping_address"],
   SALES_ORDER_LINES: ["sales_order_line_id", "sales_order_id", "channel", "amazon_order_item_id", "product_id", "amazon_sku", "wholesale_sku", "qty_ordered", "qty_picked", "qty_remaining", "unit_type", "unit_price", "currency", "line_total", "preferred_internal_lot_id", "preferred_location_id", "line_status", "notes", "unit_weight_lbs", "inventory_qty_required", "inventory_unit_type", "unit_cost", "estimated_gross_profit", "expiration_date", "fefo_status"],
@@ -1259,6 +1260,11 @@ function locationHardBlockReason_(location) {
   if (!location || !location.location_id) return "LOCATION_NOT_FOUND";
   if (!isActiveRecord_(location)) return "LOCATION_INACTIVE";
   const status = String(location.current_status || "AVAILABLE").trim().toUpperCase();
+  const locationType = String(location.location_type || "").trim().toUpperCase();
+  if (["FLOOR_STORAGE", "PACKING_AREA"].indexOf(locationType) >= 0
+      && ["", "AVAILABLE", "UNAVAILABLE", "OCCUPIED", "EMPTY", "MULTI"].indexOf(status) >= 0) {
+    return "";
+  }
   const blocked = ["BLOCKED", "UNAVAILABLE", "OUT_OF_SERVICE", "MAINTENANCE", "INACTIVE"];
   return blocked.indexOf(status) >= 0 ? "LOCATION_" + status : "";
 }
@@ -1271,6 +1277,17 @@ function syncLocationInventoryStatus_(locationId) {
   const location = readTable_("LOCATIONS").find((row) => String(row.location_id || "").trim() === locationId);
   if (!location) return "";
   const currentStatus = String(location.current_status || "AVAILABLE").trim().toUpperCase();
+  const locationType = String(location.location_type || "").trim().toUpperCase();
+  if (["FLOOR_STORAGE", "PACKING_AREA"].indexOf(locationType) >= 0) {
+    // Logical multi-lot locations stay open for additional inventory. Preserve
+    // deliberate maintenance blocks, but repair stale rack-style occupancy states.
+    const multiStatuses = ["", "AVAILABLE", "UNAVAILABLE", "OCCUPIED", "EMPTY", "MULTI"];
+    if (multiStatuses.indexOf(currentStatus) < 0) return currentStatus;
+    if (currentStatus !== "MULTI") {
+      updateTableRecord_("LOCATIONS", "location_id", locationId, { current_status: "MULTI" });
+    }
+    return "MULTI";
+  }
   const inventoryManagedStatuses = ["", "AVAILABLE", "UNAVAILABLE", "OCCUPIED", "EMPTY"];
   if (inventoryManagedStatuses.indexOf(currentStatus) < 0) return currentStatus;
 

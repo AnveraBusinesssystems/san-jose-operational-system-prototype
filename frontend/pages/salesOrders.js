@@ -42,13 +42,13 @@ export async function render(ctx) {
           </div>
         </div>
         ${table([
-          { label: "SO", key: "sales_order_id" },
-          { label: "Date", render: (row) => escapeHtml(formatDate(row.order_date)) },
-          { label: "Customer", render: (row) => escapeHtml(row.customer?.supplier_name || row.customer_name || row.customer_id || "") },
-          { label: "Channel", render: (row) => escapeHtml(displayValue(row.channel)) },
-          { label: "Products", render: (row) => escapeHtml(row.product_names || row.line_count || 0) },
-          { label: "Total", render: (row) => money(row.total_amount) },
-          { label: "Status", render: (row) => status(row.status) },
+          { label: "SO", key: "sales_order_id", sortable: true },
+          { label: "Date", sortable: true, sortValue: (row) => normalizedDate(row.order_date), render: (row) => escapeHtml(formatDate(row.order_date)) },
+          { label: "Customer", sortable: true, sortValue: (row) => row.customer?.supplier_name || row.customer_name || row.customer_id || "", render: (row) => escapeHtml(row.customer?.supplier_name || row.customer_name || row.customer_id || "") },
+          { label: "Channel", sortable: true, sortValue: (row) => row.channel || "", render: (row) => escapeHtml(displayValue(row.channel)) },
+          { label: "Products", sortable: true, sortValue: (row) => row.product_names || row.line_count || "", render: (row) => escapeHtml(row.product_names || row.line_count || 0) },
+          { label: "Total", sortable: true, sortType: "number", sortValue: (row) => Number(row.total_amount || 0), render: (row) => money(row.total_amount) },
+          { label: "Status", sortable: true, sortValue: (row) => row.status || "", render: (row) => status(row.status) },
           { label: "Actions", render: (row) => actionButtons(ctx, row) }
         ], orders)}
       </section>

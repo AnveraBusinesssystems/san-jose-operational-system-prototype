@@ -27,12 +27,12 @@ export async function render(ctx) {
       <section class="panel">
         <div class="panel-header"><h2>Purchase Orders</h2></div>
         ${table([
-          { label: "PO", key: "po_id" },
-          { label: "Date", render: (row) => escapeHtml(formatDate(row.order_date)) },
-          { label: "Supplier", render: (row) => escapeHtml(row.supplier?.supplier_name || row.supplier_id) },
-          { label: "Products", render: (row) => escapeHtml(row.line_count || 0) },
-          { label: "Total", render: (row) => money(row.total_amount) },
-          { label: "Status", render: (row) => status(row.po_status) },
+          { label: "PO", key: "po_id", sortable: true },
+          { label: "Date", sortable: true, sortValue: (row) => normalizedDate(row.order_date), render: (row) => escapeHtml(formatDate(row.order_date)) },
+          { label: "Supplier", sortable: true, sortValue: (row) => row.supplier?.supplier_name || row.supplier_id || "", render: (row) => escapeHtml(row.supplier?.supplier_name || row.supplier_id) },
+          { label: "Products", sortable: true, sortType: "number", sortValue: (row) => Number(row.line_count || 0), render: (row) => escapeHtml(row.line_count || 0) },
+          { label: "Total", sortable: true, sortType: "number", sortValue: (row) => Number(row.total_amount || 0), render: (row) => money(row.total_amount) },
+          { label: "Status", sortable: true, sortValue: (row) => row.po_status || "", render: (row) => status(row.po_status) },
           { label: "Actions", render: (row) => actionButtons(ctx, row) }
         ], purchaseOrders)}
       </section>
@@ -41,6 +41,106 @@ export async function render(ctx) {
 
   setupPoBuilder(ctx, activeProducts, activeSuppliers);
   setupPurchaseOrderActions(ctx);
+  installPurchaseOrderExplorer(ctx.view, purchaseOrders);
+}
+
+function installPurchaseOrderExplorer(root, purchaseOrders) {
+  const tableElement = root.querySelector(".panel table");
+  const tableWrap = tableElement?.closest(".table-wrap");
+  if (!tableElement || !tableWrap) return;
+  tableWrap.previousElementSibling?.classList.contains("table-tools") && tableWrap.previousElementSibling.remove();
+
+  const rows = Array.from(tableElement.tBodies?.[0]?.rows || []);
+  const supplierValues = new Set();
+  const statusValues = new Set();
+  rows.forEach((row, index) => {
+    const order = purchaseOrders[index] || {};
+    const supplier = String(order.supplier?.supplier_name || order.supplier_id || "").trim();
+    const orderStatus = String(order.po_status || "").trim().toUpperCase();
+    row.dataset.orderPo = String(order.po_id || "");
+    row.dataset.orderDate = normalizedDate(order.order_date);
+    row.dataset.orderSupplier = supplier;
+    row.dataset.orderProducts = String(Number(order.line_count || 0));
+    row.dataset.orderTotal = String(Number(order.total_amount || 0));
+    row.dataset.orderStatus = orderStatus;
+    row.dataset.orderSearch = [order.po_id, supplier, orderStatus, order.line_count, order.total_amount].join(" ").toLowerCase();
+    row.dataset.orderOriginalIndex = String(index);
+    if (supplier) supplierValues.add(supplier);
+    if (orderStatus) statusValues.add(orderStatus);
+  });
+
+  const controls = document.createElement("div");
+  controls.className = "order-table-controls";
+  controls.innerHTML = `
+    <label class="order-table-field order-table-search"><span>Search</span><input type="search" placeholder="PO, supplier, status…" data-po-search></label>
+    ${orderSelect("Supplier", "po-supplier", "All suppliers", Array.from(supplierValues).sort(naturalCompare))}
+    ${orderSelect("Status", "po-status", "All statuses", Array.from(statusValues).sort(naturalCompare), displayValue)}
+    <label class="order-table-field"><span>Date from</span><input type="date" data-po-date-from></label>
+    <label class="order-table-field"><span>Date to</span><input type="date" data-po-date-to></label>
+    <label class="order-table-field"><span>Sort by</span><select data-po-sort>
+      <option value="date">Date</option><option value="po">PO number</option><option value="supplier">Supplier</option>
+      <option value="products">Product count</option><option value="total">Total</option><option value="status">Status</option>
+    </select></label>
+    <label class="order-table-field"><span>Order</span><select data-po-direction>
+      <option value="desc">High to low / newest</option><option value="asc">Low to high / oldest</option>
+    </select></label>
+    <button class="order-table-clear" type="button" data-po-clear>Clear</button>
+    <span class="order-table-count" data-po-count></span>`;
+  tableWrap.before(controls);
+
+  const get = (selector) => controls.querySelector(selector);
+  const apply = () => {
+    const query = String(get("[data-po-search]").value || "").trim().toLowerCase();
+    const supplier = get("[data-po-supplier]").value;
+    const orderStatus = get("[data-po-status]").value;
+    const from = get("[data-po-date-from]").value;
+    const to = get("[data-po-date-to]").value;
+    const sortKey = get("[data-po-sort]").value;
+    const direction = get("[data-po-direction]").value === "asc" ? 1 : -1;
+    const dataKey = {
+      po: "orderPo", date: "orderDate", supplier: "orderSupplier",
+      products: "orderProducts", total: "orderTotal", status: "orderStatus"
+    }[sortKey];
+    const numeric = ["products", "total"].includes(sortKey);
+
+    rows.sort((left, right) => {
+      const a = left.dataset[dataKey] || "";
+      const b = right.dataset[dataKey] || "";
+      const compared = numeric ? Number(a) - Number(b) : naturalCompare(a, b);
+      return compared ? compared * direction : Number(left.dataset.orderOriginalIndex) - Number(right.dataset.orderOriginalIndex);
+    }).forEach((row) => tableElement.tBodies[0].append(row));
+
+    let visible = 0;
+    rows.forEach((row) => {
+      const show = (!query || row.dataset.orderSearch.includes(query))
+        && (!supplier || row.dataset.orderSupplier === supplier)
+        && (!orderStatus || row.dataset.orderStatus === orderStatus)
+        && (!from || row.dataset.orderDate >= from)
+        && (!to || row.dataset.orderDate <= to);
+      row.hidden = !show;
+      if (show) visible += 1;
+    });
+    get("[data-po-count]").textContent = `${visible} of ${rows.length}`;
+  };
+
+  controls.querySelectorAll("select,input").forEach((control) => {
+    control.addEventListener(control.type === "search" ? "input" : "change", apply);
+  });
+  get("[data-po-clear]").addEventListener("click", () => {
+    controls.querySelectorAll("select,input").forEach((control) => { control.value = ""; });
+    get("[data-po-sort]").value = "date";
+    get("[data-po-direction]").value = "desc";
+    apply();
+  });
+  apply();
+}
+
+function orderSelect(label, name, placeholder, values, formatter = (value) => value) {
+  return `<label class="order-table-field"><span>${escapeHtml(label)}</span><select data-${name}><option value="">${escapeHtml(placeholder)}</option>${values.map((value) => `<option value="${escapeHtml(value)}">${escapeHtml(formatter(value))}</option>`).join("")}</select></label>`;
+}
+
+function naturalCompare(left, right) {
+  return String(left || "").localeCompare(String(right || ""), undefined, { numeric: true, sensitivity: "base" });
 }
 
 function poForm(products, suppliers) {
@@ -601,6 +701,16 @@ function todayValue() {
 function formatDate(value) {
   if (!value) return "";
   return String(value).slice(0, 10);
+}
+
+function normalizedDate(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? String(value).slice(0, 10) : date.toISOString().slice(0, 10);
+}
+
+function displayValue(value) {
+  return String(value || "—").replaceAll("_", " ");
 }
 
 function formatNumber(value) {

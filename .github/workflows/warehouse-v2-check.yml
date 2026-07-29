@@ -32,9 +32,12 @@ jobs:
             frontend/js/api-smooth1.js
             frontend/js/sales-order-api.js
             frontend/js/warehouse-v2-api.js
+            frontend/pages/purchaseOrders.js
             frontend/pages/receiving-v2.js
             frontend/pages/sendProduct-v2.js
             frontend/pages/packing.js
+            frontend/pages/salesOrders.js
+            frontend/pages/salesOrdersProfessional.js
             frontend/pages/salesOrdersClean.js
           )
           for file in "${files[@]}"; do
@@ -48,6 +51,9 @@ jobs:
           set -euo pipefail
           cat apps-script/*.gs > /tmp/san-jose-apps-script.js
           node --check /tmp/san-jose-apps-script.js
+
+      - name: Run warehouse regression tests
+        run: node --test tests/warehouse-v2-regression.test.cjs
 
       - name: Verify warehouse route contract
         shell: bash

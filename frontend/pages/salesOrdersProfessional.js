@@ -1,4 +1,4 @@
-import { render as renderLegacySalesOrders } from "./salesOrders.js?v=delivery1";
+import { render as renderLegacySalesOrders } from "./salesOrders.js?v=order-filters1";
 import { getSalesOrderDetail, listSalesOrders } from "../js/api-smooth1.js?v=orders1";
 import { installDeliveryActions, replaceAdminDeliveryActions } from "../js/salesDelivery.js?v=delivery1";
 
@@ -46,14 +46,20 @@ function installSalesOrderExplorer(root, orders = []) {
 
   const currentHeaders = Array.from(table.tHead?.rows?.[0]?.cells || []);
   const actionIndex = headerIndex(currentHeaders, "Actions");
-  if (currentHeaders[0]) currentHeaders[0].textContent = "Folio";
+  if (currentHeaders[0]) {
+    const label = currentHeaders[0].querySelector(".table-sort-button > span");
+    if (label) label.textContent = "Folio";
+    else currentHeaders[0].textContent = "Folio";
+  }
+  reindexSortColumns(table);
 
   const rows = Array.from(table.tBodies?.[0]?.rows || []);
   const customerValues = new Set();
   const statusValues = new Set();
   const folioValues = new Set();
+  const channelValues = new Set();
 
-  rows.forEach((row) => {
+  rows.forEach((row, index) => {
     const rawFirstCell = String(row.cells[0]?.textContent || "").trim();
     const idFromAction = String(row.querySelector("[data-sales-order-id]")?.dataset.salesOrderId || "").trim();
     const matchedOrder = orderById.get(idFromAction)
@@ -66,12 +72,18 @@ function installSalesOrderExplorer(root, orders = []) {
     const customer = String(matchedOrder?.customer?.supplier_name || matchedOrder?.customer_name || matchedOrder?.customer_id || labeledText(row, "Customer")).trim();
     const status = String(matchedOrder?.status || labeledText(row, "Status")).trim().toUpperCase();
     const date = normalizedDate(matchedOrder?.order_date || labeledText(row, "Date"));
+    const channel = String(matchedOrder?.channel || labeledText(row, "Channel")).trim().toUpperCase();
+    const total = Number(matchedOrder?.total_amount || numericText(labeledText(row, "Total")) || 0);
 
     row.dataset.salesOrderId = orderId;
     row.dataset.salesFolio = folio;
     row.dataset.salesCustomer = customer;
     row.dataset.salesStatus = status;
     row.dataset.salesDate = date;
+    row.dataset.salesChannel = channel;
+    row.dataset.salesTotal = String(total);
+    row.dataset.salesSearch = [orderId, folio, customer, status, channel, total].join(" ").toLowerCase();
+    row.dataset.salesOriginalIndex = String(index);
 
     if (row.cells[0]) {
       row.cells[0].dataset.label = "Folio";
@@ -91,16 +103,26 @@ function installSalesOrderExplorer(root, orders = []) {
     if (customer) customerValues.add(customer);
     if (status) statusValues.add(status);
     if (folio) folioValues.add(folio);
+    if (channel) channelValues.add(channel);
   });
 
   const filters = document.createElement("div");
   filters.className = "sales-order-filter-bar";
   filters.innerHTML = `
+    <label class="sales-filter-field sales-filter-search"><span>Search</span><input type="search" placeholder="Folio, customer, status…" data-filter-search></label>
     ${selectFilter("Status", "status", "All statuses", Array.from(statusValues).sort(), displayValue)}
     <label class="sales-filter-field"><span>Date from</span><input type="date" data-filter-date-from></label>
     <label class="sales-filter-field"><span>Date to</span><input type="date" data-filter-date-to></label>
     ${selectFilter("Customer", "customer", "All customers", Array.from(customerValues).sort())}
+    ${selectFilter("Channel", "channel", "All channels", Array.from(channelValues).sort(), displayValue)}
     ${selectFilter("Folio", "folio", "All folios", Array.from(folioValues).sort((a, b) => b.localeCompare(a, undefined, { numeric: true })))}
+    <label class="sales-filter-field"><span>Sort by</span><select data-filter-sort>
+      <option value="date">Date</option><option value="folio">Folio</option><option value="customer">Customer</option>
+      <option value="channel">Channel</option><option value="total">Total</option><option value="status">Status</option>
+    </select></label>
+    <label class="sales-filter-field"><span>Order</span><select data-filter-direction>
+      <option value="desc">High to low / newest</option><option value="asc">Low to high / oldest</option>
+    </select></label>
     <button class="sales-clear-filters" type="button" data-clear-filters>Clear</button>
     <span class="sales-filter-count" data-filter-count></span>
   `;
@@ -113,14 +135,38 @@ function installSalesOrderExplorer(root, orders = []) {
     to: filters.querySelector("[data-filter-date-to]"),
     customer: filters.querySelector("[data-filter-customer]"),
     folio: filters.querySelector("[data-filter-folio]"),
+    channel: filters.querySelector("[data-filter-channel]"),
+    search: filters.querySelector("[data-filter-search]"),
+    sort: filters.querySelector("[data-filter-sort]"),
+    direction: filters.querySelector("[data-filter-direction]"),
     count: filters.querySelector("[data-filter-count]")
   };
 
   const applyFilters = () => {
+    const dataKey = {
+      date: "salesDate", folio: "salesFolio", customer: "salesCustomer",
+      channel: "salesChannel", total: "salesTotal", status: "salesStatus"
+    }[controls.sort.value];
+    const multiplier = controls.direction.value === "asc" ? 1 : -1;
+    const numeric = controls.sort.value === "total";
+    rows.sort((left, right) => {
+      const a = left.dataset[dataKey] || "";
+      const b = right.dataset[dataKey] || "";
+      const comparison = numeric
+        ? Number(a) - Number(b)
+        : a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
+      return comparison
+        ? comparison * multiplier
+        : Number(left.dataset.salesOriginalIndex) - Number(right.dataset.salesOriginalIndex);
+    }).forEach((row) => table.tBodies[0].append(row));
+
+    const query = controls.search.value.trim().toLowerCase();
     let visible = 0;
     rows.forEach((row) => {
-      const show = (!controls.status.value || row.dataset.salesStatus === controls.status.value)
+      const show = (!query || row.dataset.salesSearch.includes(query))
+        && (!controls.status.value || row.dataset.salesStatus === controls.status.value)
         && (!controls.customer.value || row.dataset.salesCustomer === controls.customer.value)
+        && (!controls.channel.value || row.dataset.salesChannel === controls.channel.value)
         && (!controls.folio.value || row.dataset.salesFolio === controls.folio.value)
         && (!controls.from.value || row.dataset.salesDate >= controls.from.value)
         && (!controls.to.value || row.dataset.salesDate <= controls.to.value);
@@ -130,9 +176,13 @@ function installSalesOrderExplorer(root, orders = []) {
     controls.count.textContent = `${visible} of ${rows.length}`;
   };
 
-  filters.querySelectorAll("select,input").forEach((control) => control.addEventListener("change", applyFilters));
+  filters.querySelectorAll("select,input").forEach((control) => {
+    control.addEventListener(control.type === "search" ? "input" : "change", applyFilters);
+  });
   filters.querySelector("[data-clear-filters]")?.addEventListener("click", () => {
     filters.querySelectorAll("select,input").forEach((control) => { control.value = ""; });
+    controls.sort.value = "date";
+    controls.direction.value = "desc";
     applyFilters();
   });
 
@@ -282,8 +332,10 @@ function installGroupedLotPricing(root) {
 function removeOrderBuilder(root) { root.querySelector(".sales-order-builder")?.remove(); }
 function headerIndex(headers, label) { return headers.findIndex((cell) => String(cell.textContent || "").trim().toUpperCase() === label.toUpperCase()); }
 function removeColumn(table, index) { table.tHead?.rows?.[0]?.cells?.[index]?.remove(); Array.from(table.tBodies?.[0]?.rows || []).forEach((row) => row.cells[index]?.remove()); }
+function reindexSortColumns(table) { Array.from(table.tHead?.rows?.[0]?.cells || []).forEach((cell, index) => { const button = cell.querySelector("[data-sort-column]"); if (button) button.dataset.sortColumn = String(index); }); }
 function labeledText(row, label) { return String(row.querySelector(`[data-label="${label}"]`)?.textContent || "").trim(); }
 function normalizedDate(value) { const date = new Date(value); return Number.isNaN(date.getTime()) ? "" : date.toISOString().slice(0, 10); }
+function numericText(value) { const parsed = Number(String(value || "").replace(/[^0-9.-]+/g, "")); return Number.isFinite(parsed) ? parsed : 0; }
 function financialName(line) { const notes = String(line.notes || ""); return notes.includes("FREIGHT") ? "Freight" : notes.includes("FEES") ? "Fees" : ""; }
 function fact(label, value) { return `<div><span>${escapeHtml(label)}</span><strong>${escapeHtml(value || "—")}</strong></div>`; }
 function normalizeRole(role) { const value = String(role || "OPERATOR").toUpperCase(); return value === "OWNER" ? "ADMIN" : value; }

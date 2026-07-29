@@ -407,6 +407,84 @@ tr:last-child td {
   border-bottom: 0 !important;
 }
 
+.order-table-controls {
+  align-items: end;
+  border-bottom: 1px solid var(--sj-border-light);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 4px 0 14px;
+  padding-bottom: 14px;
+}
+
+.order-table-field {
+  display: grid;
+  gap: 5px;
+  min-width: 145px;
+}
+
+.order-table-search {
+  min-width: 220px;
+}
+
+.order-table-field span {
+  color: var(--sj-muted);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .03em;
+  text-transform: uppercase;
+}
+
+.order-table-field input,
+.order-table-field select {
+  background: #fff;
+  border: 1px solid var(--sj-border);
+  border-radius: 6px;
+  color: var(--sj-text);
+  font: inherit;
+  min-height: 42px;
+  padding: 0 10px;
+}
+
+.order-table-clear {
+  background: #fff;
+  border: 1px solid var(--sj-border);
+  border-radius: 6px;
+  color: #176b5b;
+  cursor: pointer;
+  font-weight: 800;
+  min-height: 42px;
+  padding: 0 14px;
+}
+
+.order-table-count {
+  color: var(--sj-muted);
+  font-size: 12px;
+  margin-left: auto;
+  padding-bottom: 12px;
+}
+
+@media (max-width: 700px) {
+  .order-table-field,
+  .order-table-search {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .order-table-field input,
+  .order-table-field select,
+  .order-table-clear {
+    min-height: 48px;
+    width: 100%;
+  }
+
+  .order-table-count {
+    margin-left: 0;
+    padding-bottom: 0;
+    width: 100%;
+  }
+}
+
 .status,
 .badge,
 .pill {

@@ -400,6 +400,25 @@ function sendSalesOrderSelections(payload) {
   if (!selections.length) throw new Error("Select at least one storage space to send.");
 
   return withScriptLock_(function () {
+    const duplicateMovements = [];
+    const pendingSelections = [];
+    selections.forEach((selection, index) => {
+      const operationId = warehouseSalesSelectionOperationIdV2_(input, selection, index);
+      const duplicate = warehouseFindByOperationV2_("INVENTORY_MOVEMENTS", operationId);
+      if (duplicate) {
+        duplicateMovements.push({ ...duplicate, duplicate_request: true });
+      } else {
+        pendingSelections.push({ ...selection, operation_id: operationId });
+      }
+    });
+    if (!pendingSelections.length && duplicateMovements.length) {
+      return {
+        movements: duplicateMovements,
+        salesOrder: getSalesOrderDetail({ sales_order_id: salesOrderId }),
+        duplicate_request: true
+      };
+    }
+
     const order = readTable_("SALES_ORDERS").find((row) => String(row.sales_order_id || "") === salesOrderId);
     if (!order) throw new Error("Sales Order was not found.");
     const orderStatus = String(order.status || "").toUpperCase();
@@ -407,10 +426,11 @@ function sendSalesOrderSelections(payload) {
 
     const lines = readTable_("SALES_ORDER_LINES").filter((row) => String(row.sales_order_id || "") === salesOrderId);
     const lots = byId_(readTable_("LOTS"), "internal_lot_id");
+    validateWarehouseSalesReservationsV2_(salesOrderId, pendingSelections);
     const planned = [];
     const byLot = {};
     const byLine = {};
-    selections.forEach((selection, index) => {
+    pendingSelections.forEach((selection, index) => {
       const line = lines.find((row) => String(row.sales_order_line_id || "") === String(selection.sales_order_line_id || ""));
       if (!line) throw new Error(`Selection ${index + 1} does not belong to this Sales Order.`);
       const lot = lots[String(selection.internal_lot_id || "")];
@@ -437,14 +457,9 @@ function sendSalesOrderSelections(payload) {
       if (byLine[lineId] > remainingBase + 0.0001) throw new Error(`Selected quantity exceeds the remaining need for ${line.product_id}.`);
     });
 
-    const movements = [];
+    const movements = duplicateMovements.slice();
     planned.forEach((item, index) => {
-      const operationId = warehouseOperationIdV2_(item.selection.operation_id || `${input.operation_id || "SEND"}-${index + 1}`, "SEND");
-      const duplicate = warehouseFindByOperationV2_("INVENTORY_MOVEMENTS", operationId);
-      if (duplicate) {
-        movements.push({ ...duplicate, duplicate_request: true });
-        return;
-      }
+      const operationId = item.selection.operation_id;
       const currentQty = warehouseActiveLotQtyV2_(item.lot);
       const nextQty = Math.max(0, currentQty - item.baseQty);
       updateTableRecord_("LOTS", "internal_lot_id", item.lot.internal_lot_id, {
@@ -476,7 +491,11 @@ function sendSalesOrderSelections(payload) {
     });
 
     writeAuditLog_({ user_id: user.user_id, role: user.role, action_type: "SEND_SALES_ORDER_SELECTIONS", table_name: "SALES_ORDERS", record_id: salesOrderId, source_screen: "SEND_PRODUCT_V2", notes: `${movements.length} storage selection(s).` });
-    return { movements, salesOrder: getSalesOrderDetail({ sales_order_id: salesOrderId }) };
+    return {
+      movements,
+      salesOrder: getSalesOrderDetail({ sales_order_id: salesOrderId }),
+      duplicate_request: duplicateMovements.length > 0
+    };
   });
 }
 

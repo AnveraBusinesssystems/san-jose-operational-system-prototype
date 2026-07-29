@@ -1,4 +1,4 @@
-import { render as renderProfessional } from "./salesOrdersProfessional.js?v=warehouse-v2";
+import { render as renderProfessional } from "./salesOrdersProfessional.js?v=order-filters1";
 import { createSalesOrder, listSuppliers } from "../js/api-smooth1.js?v=warehouse-v2-sales";
 import { listSalesProductAvailability } from "../js/warehouse-v2-api.js?v=warehouse-v2-sales";
 import { escapeHtml, formatMoney, notice } from "../js/utils.js?v=filters1";

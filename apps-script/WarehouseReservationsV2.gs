@@ -74,9 +74,12 @@ function validateWarehouseSalesReservationsV2_(salesOrderId, selections) {
 }
 
 function sendSalesOrderSelectionsSafe(payload) {
-  payload = payload || {};
-  const input = payload.input || payload;
-  const salesOrderId = String(input.sales_order_id || "").trim();
-  validateWarehouseSalesReservationsV2_(salesOrderId, Array.isArray(input.selections) ? input.selections : []);
-  return sendSalesOrderSelections(payload);
+  return sendSalesOrderSelections(payload || {});
+}
+
+function warehouseSalesSelectionOperationIdV2_(input, selection, index) {
+  return warehouseOperationIdV2_(
+    (selection || {}).operation_id || `${(input || {}).operation_id || "SEND"}-${index + 1}`,
+    "SEND"
+  );
 }
