@@ -44,9 +44,10 @@
           attempts += 1;
           if (attempts < 25) window.setTimeout(selectOverview, 40);
         };
-        window.addEventListener("hashchange", openReportsOverview);
-        window.addEventListener("DOMContentLoaded", openReportsOverview);
+        selectOverview();
       }
+      window.addEventListener("hashchange", openReportsOverview);
+      window.addEventListener("DOMContentLoaded", openReportsOverview);
     </script>
   </head>
   <body>
