@@ -109,7 +109,8 @@ function handleApiRequest_(action, payloadText, callback) {
       getOperationalReports,
       lookupScan,
       matchAmazonPackageScan,
-      validateOperationalSchema
+      validateOperationalSchema,
+      warehouseV2Api
     };
     if (!routes[action]) throw new Error("Unknown action: " + action);
     return json_({ ok: true, result: routes[action](payload) }, callback);
