@@ -1,0 +1,84 @@
+/* Customers & Vendors — page-specific presentation matching the Products catalog. */
+
+.parties-modern-page { display: grid; gap: 18px; }
+.parties-modern-page .party-panel { background: #fff; border: 1px solid #dfe6e1; border-radius: 10px; overflow: hidden; box-shadow: 0 2px 8px rgba(22,45,32,.035); }
+.parties-modern-page .party-panel-heading { min-height: 56px; padding: 0 18px; border-bottom: 1px solid #e4e9e6; display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.parties-modern-page .party-panel-title { display: flex; align-items: center; gap: 10px; }
+.parties-modern-page .party-panel-title h2 { margin: 0; color: #121a16; font-size: 17px; }
+.parties-modern-page .party-panel-title .panel-icon { width: 24px; height: 24px; display: grid; place-items: center; color: #0b7a3e; font-weight: 900; }
+
+.parties-modern-page .party-form { padding: 18px; display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 14px 16px; align-items: end; }
+.parties-modern-page .party-field { min-width: 0; }
+.parties-modern-page .party-field.full { grid-column: 1 / -1; }
+.parties-modern-page .party-field label { display: block; margin-bottom: 7px; color: #374151; font-size: 12px; font-weight: 700; }
+.parties-modern-page .party-field input,
+.parties-modern-page .party-field select,
+.parties-modern-page .party-field textarea,
+.parties-modern-page .party-filter,
+.parties-modern-page .party-search { width: 100%; border: 1px solid #cfd9d3; border-radius: 6px; background: #fff; color: #111827; font: inherit; box-shadow: none; }
+.parties-modern-page .party-field input,
+.parties-modern-page .party-field select,
+.parties-modern-page .party-filter,
+.parties-modern-page .party-search { min-height: 40px; padding: 0 12px; }
+.parties-modern-page .party-field textarea { min-height: 76px; padding: 10px 12px; resize: vertical; }
+.parties-modern-page .party-field input:focus,
+.parties-modern-page .party-field select:focus,
+.parties-modern-page .party-field textarea:focus,
+.parties-modern-page .party-filter:focus,
+.parties-modern-page .party-search:focus { outline: 2px solid rgba(11,122,62,.13); outline-offset: 1px; border-color: #0b7a3e; }
+.parties-modern-page .save-party-button { width: 100%; min-height: 40px; border: 1px solid #0a6d38 !important; border-radius: 6px !important; background: #12783f !important; color: #fff !important; font-weight: 800; cursor: pointer; }
+
+.parties-modern-page .party-toolbar { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-left: auto; }
+.parties-modern-page .party-filter { width: 160px; min-width: 160px; height: 38px; min-height: 38px !important; border-radius: 4px !important; padding: 0 34px 0 11px !important; font-size: 13px; }
+.parties-modern-page .party-search-wrap { position: relative; width: 280px; margin: 0 !important; display: block; }
+.parties-modern-page .party-search-wrap > .sr-only { position: absolute !important; width: 1px !important; height: 1px !important; padding: 0 !important; margin: -1px !important; overflow: hidden !important; clip: rect(0,0,0,0) !important; white-space: nowrap !important; border: 0 !important; }
+.parties-modern-page .party-search-wrap::before { content: "⌕"; position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: #66756d; font-size: 17px; pointer-events: none; z-index: 1; }
+.parties-modern-page .party-search { height: 38px; min-height: 38px !important; padding: 0 11px 0 33px !important; border-radius: 4px !important; font-size: 13px; }
+
+.parties-modern-page .party-table-wrap { width: 100%; overflow-x: auto; }
+.parties-modern-page .party-table { width: 100%; border-collapse: collapse !important; border: 0 !important; border-radius: 0 !important; min-width: 980px; background: #fff !important; }
+.parties-modern-page .party-table thead { background: #fafcfb !important; }
+.parties-modern-page .party-table th,
+.parties-modern-page .party-table td { padding: 13px 16px !important; border-bottom: 1px solid #e6ebe8 !important; text-align: left; vertical-align: middle; color: #17201b; background: #fff !important; text-transform: none !important; letter-spacing: 0 !important; }
+.parties-modern-page .party-table th { color: #374151 !important; font-size: 12px !important; font-weight: 800 !important; white-space: nowrap; }
+.parties-modern-page .party-table td { font-size: 13px !important; line-height: 1.35; }
+.parties-modern-page .party-table tbody tr:hover td { background: #fbfdfc !important; }
+.parties-modern-page .party-table td.party-name { font-weight: 700; min-width: 180px; }
+.parties-modern-page .party-table td.party-contact { min-width: 130px; }
+.parties-modern-page .party-table td.party-email { min-width: 220px; white-space: normal; overflow-wrap: anywhere; }
+.parties-modern-page .party-table td.party-phone { min-width: 135px; white-space: nowrap; }
+.parties-modern-page .party-table td.party-id { white-space: nowrap; }
+.parties-modern-page .party-type-pill,
+.parties-modern-page .party-status-pill { display: inline-flex; align-items: center; gap: 7px; min-height: 26px; padding: 0 10px; border-radius: 999px; font-size: 12px; font-weight: 800; white-space: nowrap; }
+.parties-modern-page .party-type-pill.customer { background: #eef5ff; color: #285d99; }
+.parties-modern-page .party-type-pill.vendor { background: #f3f4f6; color: #4b5563; }
+.parties-modern-page .party-status-pill.active { background: #eaf7ef; color: #176b3b; }
+.parties-modern-page .party-status-pill.inactive { background: #f1f3f2; color: #67716c; }
+.parties-modern-page .party-status-pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; opacity: .75; }
+
+.parties-modern-page .party-sort,
+.parties-modern-page button.party-sort { appearance: none !important; min-height: 0 !important; height: auto !important; padding: 0 !important; margin: 0 !important; border: 0 !important; border-radius: 0 !important; background: transparent !important; box-shadow: none !important; color: #374151 !important; font: inherit !important; font-weight: 800 !important; line-height: 1.25 !important; cursor: pointer; }
+.parties-modern-page .party-sort::after { content: "↕"; margin-left: 6px; color: #819087; font-size: 11px; }
+.parties-modern-page th[aria-sort="ascending"] .party-sort::after { content: "↑"; color: #0b7a3e; }
+.parties-modern-page th[aria-sort="descending"] .party-sort::after { content: "↓"; color: #0b7a3e; }
+
+.parties-modern-page .party-footer { min-height: 58px; padding: 10px 18px; display: flex; align-items: center; justify-content: space-between; gap: 14px; color: #627068; font-size: 12px; }
+.parties-modern-page .party-pagination { display: flex; align-items: center; gap: 7px; }
+.parties-modern-page .party-pagination button,
+.parties-modern-page .party-page-size { min-width: 36px; height: 36px; border: 1px solid #d3dcd7 !important; border-radius: 4px !important; background: #fff !important; color: #1f2937 !important; font: inherit; }
+.parties-modern-page .party-pagination button.active { border-color: #0b7a3e !important; color: #0b7a3e !important; font-weight: 800; box-shadow: inset 0 0 0 1px #0b7a3e !important; }
+.parties-modern-page .party-page-size { min-width: 90px; padding: 0 8px; }
+.parties-modern-page .party-empty-row td { padding: 34px 18px !important; text-align: center; color: #6b7280; }
+
+@media (max-width: 1180px) {
+  .parties-modern-page .party-form { grid-template-columns: repeat(2,minmax(0,1fr)); }
+}
+@media (max-width: 760px) {
+  .parties-modern-page { gap: 12px; }
+  .parties-modern-page .party-form { grid-template-columns: 1fr; }
+  .parties-modern-page .party-panel-heading { align-items: flex-start; flex-direction: column; padding-top: 14px; padding-bottom: 14px; }
+  .parties-modern-page .party-toolbar { width: 100%; display: grid; grid-template-columns: 1fr; margin-left: 0; }
+  .parties-modern-page .party-filter,
+  .parties-modern-page .party-search-wrap { width: 100%; min-width: 0; }
+  .parties-modern-page .party-footer { align-items: flex-start; flex-direction: column; }
+}
