@@ -4,7 +4,7 @@ import { renderNavigation, renderRoute, configureRouter, navigate } from "./rout
 import { allowedPages } from "./permissions.js?v=rack-inventory1";
 import { enableTableFilters, enableTableSorting } from "./utils.js?v=login-repair1";
 import * as dashboard from "../pages/dashboard.js?v=login-repair1";
-import * as products from "../pages/products.js?v=login-repair1";
+import * as products from "../pages/products.js?v=products-modern1";
 import * as suppliers from "../pages/suppliers.js?v=login-repair1";
 import * as orders from "../pages/orders.js?v=login-repair1";
 import * as purchaseOrders from "../pages/purchaseOrders.js?v=login-repair1";
