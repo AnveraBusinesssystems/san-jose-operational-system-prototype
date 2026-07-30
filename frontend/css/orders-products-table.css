@@ -1,0 +1,284 @@
+/* Purchase Orders + Sales Orders table layer — intentionally mirrors the Products catalog. */
+
+/* Catalog container */
+.panel:has(.order-table-controls),
+.panel:has(.sales-order-filter-bar) {
+  background: #fff !important;
+  border: 1px solid #dfe6e1 !important;
+  border-radius: 10px !important;
+  overflow: hidden !important;
+  box-shadow: 0 2px 8px rgba(22,45,32,.035) !important;
+}
+
+.panel:has(.order-table-controls) > .panel-header,
+.panel:has(.sales-order-filter-bar) > .panel-header {
+  min-height: 56px !important;
+  margin: 0 !important;
+  padding: 0 18px !important;
+  background: #fff !important;
+  border-bottom: 1px solid #e4e9e6 !important;
+}
+
+.panel:has(.order-table-controls) > .panel-header h2,
+.panel:has(.sales-order-filter-bar) > .panel-header h2 {
+  color: #121a16 !important;
+  font-size: 17px !important;
+  font-weight: 750 !important;
+  text-transform: none !important;
+  letter-spacing: -.01em !important;
+}
+
+/* Filters: same quiet white-control language as Products. Keep all existing order filters/functionality. */
+.order-table-controls,
+.sales-order-filter-bar {
+  display: flex !important;
+  align-items: end !important;
+  flex-wrap: wrap !important;
+  gap: 10px !important;
+  margin: 0 !important;
+  padding: 14px 18px !important;
+  background: #fff !important;
+  border: 0 !important;
+  border-bottom: 1px solid #e4e9e6 !important;
+}
+
+.order-table-field,
+.sales-filter-field {
+  display: grid !important;
+  gap: 5px !important;
+  min-width: 130px !important;
+  margin: 0 !important;
+}
+
+.order-table-search,
+.sales-filter-search {
+  min-width: 245px !important;
+  flex: 1 1 245px !important;
+  max-width: 330px !important;
+}
+
+.order-table-field > span,
+.sales-filter-field > span {
+  color: #5f6d66 !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  line-height: 1.1 !important;
+  text-transform: none !important;
+  letter-spacing: 0 !important;
+}
+
+.order-table-controls input,
+.order-table-controls select,
+.sales-order-filter-bar input,
+.sales-order-filter-bar select {
+  min-height: 38px !important;
+  height: 38px !important;
+  padding: 0 10px !important;
+  background: #fff !important;
+  border: 1px solid #cfd9d3 !important;
+  border-radius: 4px !important;
+  color: #111827 !important;
+  font-size: 13px !important;
+  box-shadow: none !important;
+}
+
+.order-table-controls input:focus,
+.order-table-controls select:focus,
+.sales-order-filter-bar input:focus,
+.sales-order-filter-bar select:focus {
+  border-color: #0b7a3e !important;
+  outline: 2px solid rgba(11,122,62,.13) !important;
+  outline-offset: 1px !important;
+}
+
+.order-table-clear,
+.sales-clear-filters {
+  min-height: 38px !important;
+  height: 38px !important;
+  padding: 0 12px !important;
+  background: #fff !important;
+  border: 1px solid #cfd9d3 !important;
+  border-radius: 4px !important;
+  color: #374151 !important;
+  font-size: 13px !important;
+  font-weight: 700 !important;
+  box-shadow: none !important;
+}
+
+.order-table-clear:hover,
+.sales-clear-filters:hover {
+  background: #f7faf8 !important;
+  border-color: #aebdb4 !important;
+}
+
+.order-table-count,
+.sales-filter-count {
+  align-self: center !important;
+  margin-left: auto !important;
+  color: #6b7280 !important;
+  font-size: 12px !important;
+  white-space: nowrap !important;
+}
+
+/* Table itself: direct Products catalog styling. */
+.order-table-controls + .table-wrap,
+.sales-order-filter-bar + .table-wrap {
+  width: 100% !important;
+  margin: 0 !important;
+  overflow-x: auto !important;
+}
+
+.order-table-controls + .table-wrap table,
+.sales-order-filter-bar + .table-wrap table {
+  width: 100% !important;
+  min-width: 900px !important;
+  margin: 0 !important;
+  background: #fff !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  border-collapse: collapse !important;
+  border-spacing: 0 !important;
+  box-shadow: none !important;
+}
+
+.order-table-controls + .table-wrap thead,
+.sales-order-filter-bar + .table-wrap thead {
+  background: #fafcfb !important;
+}
+
+.order-table-controls + .table-wrap th,
+.order-table-controls + .table-wrap td,
+.sales-order-filter-bar + .table-wrap th,
+.sales-order-filter-bar + .table-wrap td {
+  padding: 13px 18px !important;
+  border-bottom: 1px solid #e6ebe8 !important;
+  text-align: left !important;
+  vertical-align: middle !important;
+  white-space: nowrap !important;
+  text-transform: none !important;
+  letter-spacing: 0 !important;
+}
+
+.order-table-controls + .table-wrap th,
+.sales-order-filter-bar + .table-wrap th {
+  background: #fafcfb !important;
+  color: #374151 !important;
+  font-size: 12px !important;
+  font-weight: 800 !important;
+}
+
+.order-table-controls + .table-wrap td,
+.sales-order-filter-bar + .table-wrap td {
+  background: #fff !important;
+  color: #17201b !important;
+  font-size: 13px !important;
+}
+
+.order-table-controls + .table-wrap tbody tr:hover td,
+.sales-order-filter-bar + .table-wrap tbody tr:hover td {
+  background: #fbfdfc !important;
+}
+
+/* Critical: sortable headings must be plain text, never green button/squares. */
+.order-table-controls + .table-wrap .table-sort-button,
+.sales-order-filter-bar + .table-wrap .table-sort-button {
+  appearance: none !important;
+  min-height: 0 !important;
+  height: auto !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: #374151 !important;
+  font: inherit !important;
+  font-weight: 800 !important;
+  line-height: 1.25 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  cursor: pointer !important;
+}
+
+.order-table-controls + .table-wrap .table-sort-button:hover,
+.sales-order-filter-bar + .table-wrap .table-sort-button:hover {
+  background: transparent !important;
+  color: #111827 !important;
+}
+
+.order-table-controls + .table-wrap .sort-indicator::after,
+.sales-order-filter-bar + .table-wrap .sort-indicator::after {
+  content: "↕";
+  color: #819087;
+  font-size: 11px;
+}
+
+.order-table-controls + .table-wrap th[aria-sort="ascending"] .sort-indicator::after,
+.sales-order-filter-bar + .table-wrap th[aria-sort="ascending"] .sort-indicator::after {
+  content: "↑";
+  color: #0b7a3e;
+}
+
+.order-table-controls + .table-wrap th[aria-sort="descending"] .sort-indicator::after,
+.sales-order-filter-bar + .table-wrap th[aria-sort="descending"] .sort-indicator::after {
+  content: "↓";
+  color: #0b7a3e;
+}
+
+/* Keep useful status/action controls, but make them visually lighter inside the catalog. */
+.order-table-controls + .table-wrap .status,
+.sales-order-filter-bar + .table-wrap .status {
+  min-height: 26px !important;
+  padding: 4px 10px !important;
+  border-radius: 999px !important;
+  font-size: 12px !important;
+  font-weight: 800 !important;
+  white-space: nowrap !important;
+}
+
+.order-table-controls + .table-wrap td:last-child button,
+.sales-order-filter-bar + .table-wrap td:last-child button {
+  min-height: 32px !important;
+  padding: 5px 9px !important;
+  border-radius: 4px !important;
+  font-size: 12px !important;
+}
+
+.sales-order-filter-bar + .table-wrap .sales-view-link,
+.sales-order-filter-bar + .table-wrap .sales-folio-link {
+  color: #176b3b !important;
+  font-weight: 700 !important;
+  text-decoration: none !important;
+}
+
+.sales-order-filter-bar + .table-wrap .sales-view-link:hover,
+.sales-order-filter-bar + .table-wrap .sales-folio-link:hover {
+  text-decoration: underline !important;
+}
+
+@media (max-width: 760px) {
+  .order-table-controls,
+  .sales-order-filter-bar {
+    padding: 12px 14px !important;
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+  }
+
+  .order-table-search,
+  .sales-filter-search {
+    grid-column: 1 / -1 !important;
+    min-width: 0 !important;
+    max-width: none !important;
+  }
+
+  .order-table-field,
+  .sales-filter-field {
+    min-width: 0 !important;
+  }
+
+  .order-table-count,
+  .sales-filter-count {
+    margin-left: 0 !important;
+  }
+}
