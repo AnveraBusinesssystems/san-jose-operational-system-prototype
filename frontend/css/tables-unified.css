@@ -1,0 +1,252 @@
+/* Unified data-table presentation across San Jose Operations.
+   Presentation only: does not change operational data, API calls, or table actions. */
+
+/* Table containers */
+.view .table-wrap,
+.view .product-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  background: #fff;
+}
+
+.view table,
+.view .data-table,
+.view .unified-data-table {
+  width: 100%;
+  background: #fff !important;
+  border: 0 !important;
+  border-collapse: collapse !important;
+  border-radius: 0 !important;
+  border-spacing: 0 !important;
+  box-shadow: none !important;
+  overflow: visible !important;
+}
+
+.view table thead,
+.view .data-table thead,
+.view .unified-data-table thead {
+  background: #fafcfb !important;
+}
+
+.view table th,
+.view .data-table th,
+.view .unified-data-table th {
+  background: #fafcfb !important;
+  border-bottom: 1px solid #dfe6e1 !important;
+  color: #374151 !important;
+  font-size: 12px !important;
+  font-weight: 800 !important;
+  letter-spacing: 0 !important;
+  line-height: 1.25 !important;
+  padding: 12px 14px !important;
+  text-transform: none !important;
+  vertical-align: middle !important;
+  white-space: nowrap;
+}
+
+.view table td,
+.view .data-table td,
+.view .unified-data-table td {
+  background: #fff !important;
+  border-bottom: 1px solid #e7ece9 !important;
+  color: #17201b !important;
+  font-size: 13px !important;
+  padding: 12px 14px !important;
+  vertical-align: middle !important;
+}
+
+.view table tbody tr:hover td,
+.view .data-table tbody tr:hover td,
+.view .unified-data-table tbody tr:hover td {
+  background: #fbfdfc !important;
+}
+
+.view table tbody tr:last-child td,
+.view .data-table tbody tr:last-child td,
+.view .unified-data-table tbody tr:last-child td {
+  border-bottom: 0 !important;
+}
+
+/* Sortable headings are text controls, never green action buttons. */
+.view table .table-sort-button,
+.view .data-table .table-sort-button,
+.view .unified-data-table .table-sort-button {
+  appearance: none !important;
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  color: #374151 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 5px !important;
+  font: inherit !important;
+  font-size: inherit !important;
+  font-weight: 800 !important;
+  height: auto !important;
+  line-height: 1.25 !important;
+  margin: 0 !important;
+  min-height: 0 !important;
+  min-width: 0 !important;
+  padding: 0 !important;
+  text-align: left !important;
+  text-transform: none !important;
+  width: auto !important;
+}
+
+.view table .table-sort-button:hover,
+.view table .table-sort-button:focus-visible {
+  background: transparent !important;
+  border: 0 !important;
+  color: #111827 !important;
+  outline: none !important;
+}
+
+.view table .sort-indicator::after {
+  content: "↕";
+  color: #8a9690;
+  font-size: 10px;
+}
+
+.view table .table-sort-button.sort-asc .sort-indicator::after { content: "↑"; color: #23613a; }
+.view table .table-sort-button.sort-desc .sort-indicator::after { content: "↓"; color: #23613a; }
+
+/* Standard search/filter bar */
+.view .table-tools,
+.view .unified-table-tools {
+  align-items: center !important;
+  background: #fff !important;
+  border: 0 !important;
+  display: flex !important;
+  justify-content: flex-end !important;
+  gap: 10px !important;
+  margin: 0 !important;
+  padding: 10px 0 10px !important;
+}
+
+.view .panel > .table-tools,
+.view .panel > .unified-table-tools {
+  margin-left: 14px !important;
+  margin-right: 14px !important;
+}
+
+.view .table-tools label,
+.view .unified-table-tools label,
+.view .unified-table-search {
+  display: block !important;
+  margin: 0 !important;
+  max-width: 320px;
+  width: 100%;
+}
+
+.view .table-tools label > span:not(.sr-only),
+.view .unified-table-tools label > span:not(.sr-only) {
+  display: none !important;
+}
+
+.view .table-filter,
+.view .unified-table-tools .table-filter {
+  background: #fff !important;
+  border: 1px solid #cbd6cf !important;
+  border-radius: 4px !important;
+  box-shadow: none !important;
+  color: #17201b !important;
+  font-size: 13px !important;
+  height: 38px !important;
+  min-height: 38px !important;
+  min-width: 0 !important;
+  padding: 0 11px !important;
+  width: 100% !important;
+}
+
+.view .table-filter:focus {
+  border-color: #23613a !important;
+  outline: 2px solid rgba(35,97,58,.14) !important;
+  outline-offset: 1px !important;
+}
+
+/* Existing order-specific filters: same quiet visual language as Products. */
+.view .order-table-controls {
+  align-items: end !important;
+  background: #fff !important;
+  border-bottom: 1px solid #e3e9e5 !important;
+  display: flex !important;
+  flex-wrap: wrap !important;
+  gap: 10px !important;
+  margin: 0 !important;
+  padding: 10px 0 12px !important;
+}
+
+.view .order-table-field {
+  display: grid !important;
+  gap: 4px !important;
+  min-width: 150px !important;
+}
+
+.view .order-table-field span {
+  color: #5f6d66 !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0 !important;
+  text-transform: none !important;
+}
+
+.view .order-table-field input,
+.view .order-table-field select,
+.view .order-table-search input,
+.view .order-table-search select {
+  background: #fff !important;
+  border: 1px solid #cbd6cf !important;
+  border-radius: 4px !important;
+  box-shadow: none !important;
+  color: #17201b !important;
+  font-size: 13px !important;
+  height: 38px !important;
+  min-height: 38px !important;
+  padding: 0 10px !important;
+}
+
+/* Panels containing tables should look like simple ERP surfaces. */
+.view .panel:has(table) {
+  background: #fff !important;
+  border: 1px solid #dfe6e1 !important;
+  border-radius: 8px !important;
+  box-shadow: none !important;
+  overflow: hidden !important;
+}
+
+.view .panel:has(table) > .panel-header {
+  background: #fff !important;
+  border-bottom: 1px solid #e3e9e5 !important;
+  margin-bottom: 0 !important;
+}
+
+/* Preserve intentionally compact/embedded tables but keep visual consistency. */
+.view table button.secondary,
+.view table .secondary {
+  border-radius: 4px !important;
+}
+
+@media (max-width: 760px) {
+  .view .table-tools,
+  .view .unified-table-tools {
+    justify-content: stretch !important;
+  }
+
+  .view .table-tools label,
+  .view .unified-table-tools label,
+  .view .unified-table-search {
+    max-width: none;
+  }
+
+  .view .order-table-controls {
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+  }
+
+  .view .order-table-field,
+  .view .order-table-search {
+    min-width: 0 !important;
+    width: 100% !important;
+  }
+}
