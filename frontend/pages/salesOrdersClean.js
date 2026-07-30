@@ -1,4 +1,4 @@
-import { render as renderProfessional } from "./salesOrdersProfessional.js?v=order-filters1";
+import { render as renderProfessional } from "./salesOrdersProfessional.js?v=sales-explorer2";
 import { createSalesOrder, listSuppliers } from "../js/api-smooth1.js?v=warehouse-v2-sales";
 import { listSalesProductAvailability } from "../js/warehouse-v2-api.js?v=warehouse-v2-sales";
 import { escapeHtml, formatMoney, notice } from "../js/utils.js?v=filters1";
@@ -123,9 +123,7 @@ function applyProduct(row, product) {
   if (!product) return;
   const unitSelect = row.querySelector("[data-sales-unit]");
   const defaultUnit = String(product.default_sales_unit || "CASE").toUpperCase();
-  if (![...unitSelect.options].some((option) => option.value === defaultUnit)) {
-    unitSelect.add(new Option(defaultUnit, defaultUnit));
-  }
+  if (![...unitSelect.options].some((option) => option.value === defaultUnit)) unitSelect.add(new Option(defaultUnit, defaultUnit));
   unitSelect.value = defaultUnit;
   row.querySelector("[data-sales-weight]").value = formatNumber(number(product.default_unit_weight_lbs) || 1);
 }
@@ -138,9 +136,8 @@ function updateLine(row, productMap) {
   const price = number(row.querySelector("[data-sales-price]")?.value);
   const required = qty * weight;
   const availability = row.querySelector("[data-sales-availability]");
-  if (product) {
-    availability.textContent = `${formatNumber(required)} LB required · ${formatNumber(product.free_base_qty)} LB free${number(product.committed_base_qty) > 0 ? ` · ${formatNumber(product.committed_base_qty)} LB committed` : ""}${required > number(product.free_base_qty) + .0001 ? " · SHORT" : ""}`;
-  } else availability.textContent = "Choose a product.";
+  if (product) availability.textContent = `${formatNumber(required)} LB required · ${formatNumber(product.free_base_qty)} LB free${number(product.committed_base_qty) > 0 ? ` · ${formatNumber(product.committed_base_qty)} LB committed` : ""}${required > number(product.free_base_qty) + .0001 ? " · SHORT" : ""}`;
+  else availability.textContent = "Choose a product.";
   row.querySelector("[data-sales-line-total]").textContent = formatMoney(qty * price);
 }
 
@@ -198,13 +195,13 @@ function ensureStyles() {
   style.id = "salesOrdersV2BuilderStyles";
   style.textContent = `
     .sales-order-builder-v2{grid-column:1/-1}.sales-v2-builder-lines{display:grid;gap:10px;margin:12px 0}.sales-v2-builder-line{border:1px solid #dce4df;border-radius:12px;padding:12px;background:#fbfdfc}.sales-v2-line-main{display:grid;grid-template-columns:minmax(220px,2fr) repeat(4,minmax(110px,1fr)) 42px;gap:10px;align-items:end}.sales-v2-line-main label{display:grid;gap:5px;font-size:.78rem;font-weight:700;color:#536159}.sales-v2-line-main input,.sales-v2-line-main select{min-height:44px;width:100%}.sales-v2-line-facts{display:flex;justify-content:space-between;gap:12px;margin-top:8px;color:#66746c;font-size:.82rem}.sales-v2-line-facts strong{color:#173f34}.sales-order-builder-v2 .status-pill{white-space:nowrap}
-    @media(max-width:760px){.sales-order-builder-v2{padding:14px}.sales-v2-line-main{grid-template-columns:1fr 1fr}.sales-v2-line-main label:first-child{grid-column:1/-1}.sales-v2-line-main .po-remove-line{grid-column:2;justify-self:end}.sales-v2-line-facts{flex-direction:column}.sales-order-builder-v2 .sales-order-header-grid{grid-template-columns:1fr!important}.sales-order-builder-v2 .po-footer{position:sticky;bottom:0;z-index:4;background:#fff;padding-bottom:calc(10px + env(safe-area-inset-bottom));box-shadow:0 -8px 18px rgba(25,50,42,.08)}.sales-order-builder-v2 .po-footer .btn{min-height:50px;width:100%}}
+    @media(max-width:760px){.sales-order-builder-v2{padding:14px}.sales-v2-line-main{grid-template-columns:1fr 1fr}.sales-v2-line-main label:first-child{grid-column:1/-1}.sales-v2-line-main .po-remove-line{align-self:end}.sales-v2-line-facts{display:grid}.sales-order-builder-v2 .panel-header{align-items:flex-start}}
   `;
   document.head.appendChild(style);
 }
 
 function normalizeRole(role) { const value = String(role || "OPERATOR").toUpperCase(); return value === "OWNER" ? "ADMIN" : value; }
-function isActive(row) { return row.is_active === undefined || row.is_active === true || String(row.is_active).toUpperCase() === "TRUE"; }
+function isActive(row) { return row?.is_active === true || String(row?.is_active || "").toUpperCase() === "TRUE"; }
+function localToday() { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; }
 function number(value) { const n = Number(value); return Number.isFinite(n) ? n : 0; }
-function formatNumber(value) { return String(Math.round(number(value) * 100) / 100); }
-function localToday() { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }
+function formatNumber(value) { return number(value).toLocaleString(undefined,{maximumFractionDigits:2}); }
