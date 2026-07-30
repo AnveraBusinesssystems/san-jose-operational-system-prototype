@@ -30,14 +30,14 @@ export function uid(prefix, list, key) {
 export function table(headers, rows) {
   if (!rows.length) return `<div class="empty">No records yet.</div>`;
   return `
-    <div class="table-tools">
-      <label>
-        <span>Filter</span>
-        <input class="table-filter" type="search" placeholder="Search table" autocomplete="off">
+    <div class="table-tools unified-table-tools">
+      <label class="unified-table-search">
+        <span class="sr-only">Search table</span>
+        <input class="table-filter" type="search" placeholder="Search" autocomplete="off" aria-label="Search table">
       </label>
     </div>
     <div class="table-wrap">
-      <table>
+      <table class="unified-data-table">
         <thead><tr>${headers.map((h, index) => `
           <th${h.sortable ? ` aria-sort="none"` : ""}>
             ${h.sortable ? `
@@ -73,20 +73,90 @@ export function table(headers, rows) {
 }
 
 export function enableTableFilters(root = document) {
+  ensureTableTools(root);
+
   root.querySelectorAll(".table-filter").forEach((input) => {
     if (input.dataset.filterReady) return;
     input.dataset.filterReady = "true";
+
+    const tableElement = resolveFilterTable(input, root);
+    if (!tableElement) return;
+
     input.addEventListener("input", () => {
-      const tableWrap = input.closest(".table-tools")?.nextElementSibling;
-      const tbody = tableWrap?.querySelector("tbody");
+      const tbody = tableElement.tBodies?.[0];
       if (!tbody) return;
 
       const query = input.value.trim().toLowerCase();
       Array.from(tbody.rows).forEach((row) => {
-        row.hidden = query && !row.textContent.toLowerCase().includes(query);
+        if (row.hasAttribute("data-catalog-empty")) return;
+        row.hidden = Boolean(query) && !row.textContent.toLowerCase().includes(query);
       });
     });
   });
+}
+
+function ensureTableTools(root) {
+  const tables = Array.from(root.querySelectorAll("table"));
+  let generatedIndex = 0;
+
+  tables.forEach((tableElement) => {
+    if (tableElement.closest("[data-product-catalog]")) return;
+    if (tableElement.dataset.noGlobalFilter === "true") return;
+
+    tableElement.classList.add("unified-data-table");
+
+    if (!tableElement.id) {
+      generatedIndex += 1;
+      tableElement.id = `sj-data-table-${Date.now()}-${generatedIndex}`;
+    }
+
+    const wrap = tableElement.closest(".table-wrap") || tableElement.parentElement;
+    const precedingTools = wrap?.previousElementSibling;
+    const existingTools = precedingTools?.classList?.contains("table-tools")
+      ? precedingTools
+      : tableElement.closest(".panel, section, article, div")?.querySelector(":scope > .table-tools");
+
+    if (existingTools) {
+      existingTools.classList.add("unified-table-tools");
+      const existingInput = existingTools.querySelector(".table-filter");
+      if (existingInput) existingInput.dataset.tableTarget = tableElement.id;
+      return;
+    }
+
+    const tools = document.createElement("div");
+    tools.className = "table-tools unified-table-tools unified-table-tools--auto";
+    tools.innerHTML = `
+      <label class="unified-table-search">
+        <span class="sr-only">Search table</span>
+        <input class="table-filter" type="search" placeholder="Search" autocomplete="off" aria-label="Search table" data-table-target="${escapeHtml(tableElement.id)}">
+      </label>
+    `;
+
+    if (wrap && wrap.parentElement) {
+      wrap.parentElement.insertBefore(tools, wrap);
+    }
+  });
+}
+
+function resolveFilterTable(input, root) {
+  const targetId = input.dataset.tableTarget;
+  if (targetId) {
+    try {
+      return root.querySelector(`#${CSS.escape(targetId)}`) || document.getElementById(targetId);
+    } catch (_error) {
+      return document.getElementById(targetId);
+    }
+  }
+
+  const tools = input.closest(".table-tools");
+  const sibling = tools?.nextElementSibling;
+  const tableElement = sibling?.matches("table") ? sibling : sibling?.querySelector("table");
+  if (tableElement) {
+    if (!tableElement.id) tableElement.id = `sj-data-table-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    input.dataset.tableTarget = tableElement.id;
+    return tableElement;
+  }
+  return null;
 }
 
 export function enableTableSorting(root = document) {
