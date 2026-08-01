@@ -1,5 +1,5 @@
 import { createUser, deactivateUser, listLocations, listUsers, resetToSpreadsheetSeed } from "../js/api-smooth1.js?v=pin1";
-import { escapeHtml, formToObject, notice, table } from "../js/utils.js";
+import { escapeHtml, formToObject, notice, table } from "../js/utils.js?v=readiness1";
 
 export async function render(ctx) {
   ctx.setTitle("Admin Center", "Manage your team and operational configuration");
@@ -20,7 +20,7 @@ export async function render(ctx) {
           <form id="userForm" class="form-grid">
             <div class="field"><label>Full name</label><input name="full_name" required placeholder="Example: Maria Garcia"></div>
             <div class="field"><label>4-digit code</label><input name="pin" inputmode="numeric" maxlength="4" pattern="[0-9]{4}" required placeholder="1234"></div>
-            <div class="field"><label>Role</label><select name="role"><option value="OPERATOR">Operator — receiving, inventory, Amazon</option><option value="MANAGER">Manager — operational controls and reports</option><option value="ADMIN">Admin — full access and team setup</option></select></div>
+            <div class="field full"><label>Role</label><select name="role"><option value="OPERATOR">Operator — warehouse tasks</option><option value="MANAGER">Manager — operations and reports</option><option value="ADMIN">Administrator — full access</option></select></div>
             <div class="field full"><button class="btn" type="submit">Create user</button></div>
           </form>
         </section>
@@ -39,10 +39,10 @@ export async function render(ctx) {
       </div>
       <section class="panel admin-secondary">
         <div>
-          <h2>Prototype controls</h2>
-          <p class="muted">Reset clears browser-only test data and restores the spreadsheet seed.</p>
+          <h2>Browser data tools</h2>
+          <p class="muted">Reset clears local browser data and reloads the connected spreadsheet snapshot.</p>
         </div>
-        <button id="resetData" class="btn danger" type="button">Reset local data</button>
+        <button id="resetData" class="btn danger" type="button">Reset browser data</button>
       </section>
       <section class="panel">
         <div class="panel-header"><h2>Locations from spreadsheet</h2></div>

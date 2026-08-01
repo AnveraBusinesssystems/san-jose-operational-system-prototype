@@ -1,4 +1,4 @@
-import { clearApiCache, getOperationalReports } from "../js/api-smooth1.js?v=product-dashboard1";
+import { clearApiCache, getOperationalReports } from "../js/api-smooth1.js?v=data-audit1";
 import { escapeHtml, formatMoney, formatQuantity } from "../js/utils.js";
 
 let dashboardData = null;
@@ -21,10 +21,10 @@ export async function render(ctx) {
     state.mode = "product";
   }
   if (!state.productId) state.productId = dashboardData.products?.[0]?.product_id || "";
-  draw(ctx.view);
+  draw(ctx.view, ctx);
 }
 
-function draw(root) {
+function draw(root, ctx) {
   root.innerHTML = `
     <div class="product-dashboard">
       ${header()}
@@ -33,7 +33,7 @@ function draw(root) {
       </main>
     </div>
   `;
-  bind(root);
+  bind(root, ctx);
 }
 
 function header() {
@@ -265,13 +265,16 @@ function filteredOverview() {
     if (row.summary.weeks_of_supply !== null && row.summary.weeks_of_supply > 16) attention.push({ product_id: row.product_id, product_name: row.product_name, type: "EXCESS", priority: 65, title: "Reduce purchasing", reason: `${decimal(row.summary.weeks_of_supply)} weeks of supply.` });
   });
   attention.sort((a,b) => b.priority - a.priority);
-  const rank = (key, descending = true) => [...rows].sort((a,b) => (Number(a.summary[key] || 0) - Number(b.summary[key] || 0)) * (descending ? -1 : 1)).slice(0,10).map(row => ({ product_id: row.product_id, product_name: row.product_name, weekly_demand: row.summary.weekly_demand, weeks_of_supply: row.summary.weeks_of_supply, margin_percent: row.summary.gross_margin_percent, profit_per_lb: row.summary.profit_per_lb, sales_volume_lb: row.summary.sales_volume_lb, selling_price_per_lb: row.summary.selling_price_per_lb, cost_per_lb: row.summary.cost_per_lb }));
+  const rank = (source, key, descending = true) => [...source].sort((a,b) => (Number(a.summary[key]) - Number(b.summary[key])) * (descending ? -1 : 1)).slice(0,10).map(row => ({ product_id: row.product_id, product_name: row.product_name, weekly_demand: row.summary.weekly_demand, weeks_of_supply: row.summary.weeks_of_supply, margin_percent: row.summary.gross_margin_percent, profit_per_lb: row.summary.profit_per_lb, sales_volume_lb: row.summary.sales_volume_lb, selling_price_per_lb: row.summary.selling_price_per_lb, cost_per_lb: row.summary.cost_per_lb }));
+  const marginRows = rows.filter((row) => row.summary.gross_margin_percent !== null
+    && Number.isFinite(Number(row.summary.gross_margin_percent))
+    && Number(row.summary.cost_coverage_percent || 0) >= 50);
   return {
     kpis: { weighted_selling_price_per_lb: volume ? revenue / volume : 0, weighted_cost_per_lb: volume ? cost / volume : 0, gross_margin_percent: revenue ? (revenue-cost)/revenue*100 : null, inventory_value: sum(rows,row=>row.summary.inventory_value), reorder_alert_count: rows.filter(row=>row.summary.inventory_position<=row.planning.reorder_point && row.summary.weekly_demand>0).length, expiring_inventory_value: sum(rows,row=>row.expiration.value_at_risk) },
     attention,
-    highest_demand: rank("weekly_demand"),
-    best_margins: rank("gross_margin_percent"),
-    lowest_margins: rank("gross_margin_percent", false),
+    highest_demand: rank(rows, "weekly_demand"),
+    best_margins: rank(marginRows, "gross_margin_percent"),
+    lowest_margins: rank(marginRows, "gross_margin_percent", false),
     expiration_risk: rows.filter(row=>row.expiration.inventory_at_risk>0).map(row=>({product_id:row.product_id,product_name:row.product_name,inventory_at_risk:row.expiration.inventory_at_risk,value_at_risk:row.expiration.value_at_risk,nearest_expiration_date:row.expiration.nearest_expiration_date,days_remaining:row.expiration.days_remaining,risk_level:row.expiration.risk_level})).sort((a,b)=>b.value_at_risk-a.value_at_risk)
   };
 }
@@ -283,16 +286,24 @@ function selectedProduct() { return dashboardData.productAnalytics?.[state.produ
 function periodRows(rows) { const start = periodStart(); return !start ? rows : rows.filter(row => new Date(row.date) >= start); }
 function periodStart() { if (state.period === "ALL") return null; const now = new Date(); if (state.period === "YTD") return new Date(now.getFullYear(),0,1); return new Date(now.getTime() - Number(state.period)*86400000); }
 
-function bind(root) {
-  root.querySelectorAll("[data-dashboard-mode]").forEach(button => button.addEventListener("click", () => { state.mode = button.dataset.dashboardMode; draw(root); }));
-  root.querySelector("[data-dashboard-product]")?.addEventListener("change", event => { state.productId = event.target.value; state.mode = "product"; window.location.hash = `reports:${encodeURIComponent(state.productId)}`; draw(root); });
-  root.querySelector("[data-dashboard-category]")?.addEventListener("change", event => { state.category = event.target.value; draw(root); });
-  root.querySelector("[data-dashboard-period]")?.addEventListener("change", event => { state.period = event.target.value; draw(root); });
-  root.querySelector("[data-dashboard-refresh]")?.addEventListener("click", async event => { event.currentTarget.disabled = true; event.currentTarget.textContent = "Refreshing..."; clearApiCache(); dashboardData = await getOperationalReports(); draw(root); });
-  root.querySelectorAll("[data-open-product]").forEach(button => button.addEventListener("click", () => { state.productId = button.dataset.openProduct; state.mode = "product"; state.tab = "summary"; window.location.hash = `reports:${encodeURIComponent(state.productId)}`; draw(root); }));
-  root.querySelectorAll("[data-product-tab]").forEach(button => button.addEventListener("click", () => { state.tab = button.dataset.productTab; draw(root); }));
-  root.querySelectorAll("[data-transaction-type]").forEach(button => button.addEventListener("click", () => { state.transactionType = button.dataset.transactionType; draw(root); }));
-  root.querySelector("[data-comparison-mode]")?.addEventListener("change", event => { state.comparison = event.target.value; draw(root); });
+function bind(root, ctx) {
+  root.querySelectorAll("[data-dashboard-mode]").forEach(button => button.addEventListener("click", () => { state.mode = button.dataset.dashboardMode; draw(root, ctx); }));
+  root.querySelector("[data-dashboard-product]")?.addEventListener("change", event => { state.productId = event.target.value; state.mode = "product"; window.location.hash = `reports:${encodeURIComponent(state.productId)}`; draw(root, ctx); });
+  root.querySelector("[data-dashboard-category]")?.addEventListener("change", event => { state.category = event.target.value; draw(root, ctx); });
+  root.querySelector("[data-dashboard-period]")?.addEventListener("change", event => { state.period = event.target.value; draw(root, ctx); });
+  root.querySelector("[data-dashboard-refresh]")?.addEventListener("click", async event => {
+    event.currentTarget.disabled = true;
+    event.currentTarget.textContent = "Refreshing...";
+    clearApiCache();
+    const refreshed = await getOperationalReports();
+    if (!ctx.isCurrent()) return;
+    dashboardData = refreshed;
+    draw(root, ctx);
+  });
+  root.querySelectorAll("[data-open-product]").forEach(button => button.addEventListener("click", () => { state.productId = button.dataset.openProduct; state.mode = "product"; state.tab = "summary"; window.location.hash = `reports:${encodeURIComponent(state.productId)}`; draw(root, ctx); }));
+  root.querySelectorAll("[data-product-tab]").forEach(button => button.addEventListener("click", () => { state.tab = button.dataset.productTab; draw(root, ctx); }));
+  root.querySelectorAll("[data-transaction-type]").forEach(button => button.addEventListener("click", () => { state.transactionType = button.dataset.transactionType; draw(root, ctx); }));
+  root.querySelector("[data-comparison-mode]")?.addEventListener("change", event => { state.comparison = event.target.value; draw(root, ctx); });
 }
 
 function kpi(label,value,subtitle,tone="") { return `<article class="dashboard-kpi ${tone ? `kpi-${tone}` : ""}"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong><small>${escapeHtml(subtitle || "")}</small></article>`; }

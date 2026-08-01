@@ -1,21 +1,21 @@
-import { warmOperationalCache } from "./api-smooth1.js?v=rack-inventory4";
+import { warmOperationalCache } from "./api-smooth1.js?v=data-audit1";
 import { getSession, signIn, signOut } from "./auth.js?v=rack-inventory1";
 import { renderNavigation, renderRoute, configureRouter, navigate } from "./router.js?v=rack-inventory1";
 import { allowedPages } from "./permissions.js?v=warehouse-v2";
-import { enableTableFilters, enableTableSorting } from "./utils.js?v=login-repair1";
-import * as dashboard from "../pages/dashboard.js?v=login-repair1";
+import { enableTableFilters, enableTableSorting } from "./utils.js?v=readiness1";
+import * as dashboard from "../pages/dashboard.js?v=readiness1";
 import * as products from "../pages/products.js?v=login-repair1";
 import * as suppliers from "../pages/suppliers.js?v=login-repair1";
 import * as orders from "../pages/orders.js?v=login-repair1";
-import * as purchaseOrders from "../pages/purchaseOrders.js?v=order-filters1";
-import * as salesOrders from "../pages/salesOrdersProfessional.js?v=order-filters1";
+import * as purchaseOrders from "../pages/purchaseOrders.js?v=data-audit1";
+import * as salesOrders from "../pages/salesOrdersProfessional.js?v=data-audit1";
 import * as receiving from "../pages/receiving.js?v=warehouse-v2";
-import * as inventory from "../pages/inventory.js?v=rack-inventory4";
+import * as inventory from "../pages/inventory.js?v=data-audit1";
 import * as packing from "../pages/packing.js?v=warehouse-v2";
 import * as scanner from "../pages/scannerTest.js?v=login-repair1";
 import * as amazon from "../pages/amazon.js?v=login-repair1";
-import * as reports from "../pages/reports.js?v=login-repair1";
-import * as admin from "../pages/admin.js?v=login-repair1";
+import * as reports from "../pages/reports.js?v=data-audit1";
+import * as admin from "../pages/admin.js?v=readiness1";
 import * as mobileHome from "../pages/mobileHome.js?v=warehouse-v2";
 import * as sendProduct from "../pages/sendProductSafe.js?v=warehouse-v2";
 
@@ -30,7 +30,7 @@ const loginButton = pinForm?.querySelector('button[type="submit"]');
 let user = getSession();
 let renderToken = 0;
 let inactivityTimer;
-const INACTIVITY_LIMIT_MS = 5 * 60 * 1000;
+const INACTIVITY_LIMIT_MS = 30 * 60 * 1000;
 
 const routes = {
   mobileHome,
@@ -50,11 +50,19 @@ const routes = {
   admin
 };
 
-function context() {
+function context(routeToken) {
+  const staleView = document.createElement("section");
+  const routeUser = user;
   return {
-    user,
-    view,
+    user: routeUser,
+    get view() {
+      return routeToken === renderToken ? view : staleView;
+    },
+    isCurrent() {
+      return routeToken === renderToken;
+    },
     setTitle(nextTitle, nextSubtitle) {
+      if (routeToken !== renderToken) return;
       title.textContent = nextTitle;
       subtitle.textContent = nextSubtitle;
     }
@@ -95,24 +103,27 @@ async function renderAppRoute(requestedRoute) {
   view.innerHTML = loadingScreen(label);
 
   try {
-    await pageModule.render(context());
+    await pageModule.render(context(token));
     if (token !== renderToken) return;
     enableTableFilters(view);
     enableTableSorting(view);
     sortProductSelects(view);
+    enhanceFormAccessibility(view);
     view.classList.remove("view-loading");
   } catch (error) {
     if (token !== renderToken) return;
     title.textContent = label;
-    subtitle.textContent = "Connection issue";
+    subtitle.textContent = "Unable to load current data";
     view.classList.remove("view-loading");
     view.innerHTML = `
-      <section class="panel">
-        <div class="panel-header"><h2>Could not load this screen</h2></div>
+      <section class="panel route-error" role="alert">
+        <div class="panel-header"><h2>This screen could not load</h2></div>
         <p class="muted">${escapeHtml(error?.message || String(error))}</p>
-        <p class="muted">Refresh the page after confirming the Apps Script deployment is accessible.</p>
+        <p class="muted">Check the connection, then try loading this screen again.</p>
+        <div class="route-error-actions"><button class="btn" id="retryRoute" type="button">Try again</button></div>
       </section>
     `;
+    view.querySelector("#retryRoute")?.addEventListener("click", renderRoute);
   }
 
   renderNavigation(user);
@@ -120,10 +131,10 @@ async function renderAppRoute(requestedRoute) {
 
 function loadingScreen(label) {
   return `
-    <section class="panel loading-panel">
+    <section class="panel loading-panel" role="status" aria-live="polite" aria-busy="true">
       <div>
         <h2>${escapeHtml(label)}</h2>
-        <p class="muted">Getting the latest spreadsheet data...</p>
+        <p class="muted">Loading current operational data...</p>
       </div>
       <div class="loading-lines" aria-hidden="true">
         <span></span>
@@ -149,6 +160,22 @@ function sortProductSelects(root = document) {
 
     select.replaceChildren(...[placeholder, ...productOptions].filter(Boolean));
     select.value = selectedValue;
+  });
+}
+
+function enhanceFormAccessibility(root = document) {
+  root.querySelectorAll("input, select, textarea").forEach((control) => {
+    if (control.type === "hidden"
+      || control.labels?.length
+      || control.hasAttribute("aria-label")
+      || control.hasAttribute("aria-labelledby")) return;
+
+    const field = control.closest(".field, .order-table-field, .sales-filter-field, .packing-inline-field");
+    const visibleLabel = field?.querySelector("label, :scope > span");
+    const labelText = visibleLabel?.textContent?.trim()
+      || control.getAttribute("placeholder")?.trim()
+      || String(control.name || control.id || "Field").replaceAll("_", " ");
+    control.setAttribute("aria-label", labelText);
   });
 }
 
@@ -188,7 +215,7 @@ function resetInactivityTimer() {
   window.clearTimeout(inactivityTimer);
   if (!user) return;
   inactivityTimer = window.setTimeout(
-    () => performSignOut("Signed out after 5 minutes of inactivity."),
+    () => performSignOut("Signed out after 30 minutes of inactivity."),
     INACTIVITY_LIMIT_MS
   );
 }

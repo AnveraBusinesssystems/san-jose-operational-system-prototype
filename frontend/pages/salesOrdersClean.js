@@ -1,5 +1,5 @@
 import { render as renderProfessional } from "./salesOrdersProfessional.js?v=sales-explorer2";
-import { createSalesOrder, listSuppliers } from "../js/api-smooth1.js?v=warehouse-v2-sales";
+import { createSalesOrder, listSuppliers } from "../js/api-smooth1.js?v=data-audit1";
 import { listSalesProductAvailability } from "../js/warehouse-v2-api.js?v=warehouse-v2-sales";
 import { escapeHtml, formatMoney, notice } from "../js/utils.js?v=filters1";
 

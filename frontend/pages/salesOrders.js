@@ -6,7 +6,7 @@ import {
   listSalesOrders,
   listSuppliers,
   salesOrderAction
-} from "../js/api-smooth1.js?v=orders1";
+} from "../js/api-smooth1.js?v=data-audit1";
 import { can } from "../js/permissions.js?v=orders1";
 import { escapeHtml, formatMoney, notice, status, table } from "../js/utils.js?v=filters1";
 
@@ -1076,6 +1076,12 @@ function formatDate(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return String(value);
   return date.toLocaleDateString();
+}
+
+function normalizedDate(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "" : date.toISOString().slice(0, 10);
 }
 
 function displayValue(value) {

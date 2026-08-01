@@ -27,8 +27,8 @@ export function uid(prefix, list, key) {
   return value;
 }
 
-export function table(headers, rows) {
-  if (!rows.length) return `<div class="empty">No records yet.</div>`;
+export function table(headers, rows, options = {}) {
+  if (!rows.length) return `<div class="empty">${escapeHtml(options.emptyMessage || "No records available.")}</div>`;
   return `
     <div class="table-tools unified-table-tools">
       <label class="unified-table-search">

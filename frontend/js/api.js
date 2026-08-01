@@ -5,7 +5,7 @@ import { GOOGLE_SCRIPT_WEB_APP_URL } from "./config.js?v=rack-inventory2";
 const DB_KEY = "sjops.database.v1";
 const APPS_CACHE_PREFIX = "sjops.apps.cache.";
 const APPS_CACHE_TTL_MS = 45000;
-const APPS_REQUEST_TIMEOUT_MS = 15000;
+const APPS_REQUEST_TIMEOUT_MS = 30000;
 const RACK_SAVE_TIMEOUT_MS = 60000;
 const APPS_AUTH_TIMEOUT_MS = 6000;
 const READ_ACTIONS = new Set([
@@ -44,7 +44,7 @@ async function callAppsScript(action, payload = {}, timeoutMs = APPS_REQUEST_TIM
     const callback = `sjopsCallback_${Date.now()}_${Math.random().toString(36).slice(2)}`;
     const script = document.createElement("script");
     const timer = window.setTimeout(() => {
-      cleanup();
+      cleanup(true);
       reject(new Error("Apps Script request timed out. Check deployment access and version."));
     }, timeoutMs);
     const url = new URL(GOOGLE_SCRIPT_WEB_APP_URL);
@@ -52,9 +52,14 @@ async function callAppsScript(action, payload = {}, timeoutMs = APPS_REQUEST_TIM
     url.searchParams.set("payload", JSON.stringify(payload));
     url.searchParams.set("callback", callback);
 
-    const cleanup = () => {
+    const cleanup = (allowLateResponse = false) => {
       window.clearTimeout(timer);
-      delete window[callback];
+      if (allowLateResponse) {
+        window[callback] = () => delete window[callback];
+        window.setTimeout(() => delete window[callback], 60000);
+      } else {
+        delete window[callback];
+      }
       script.remove();
       pendingAppsRequests.delete(cacheKey);
     };

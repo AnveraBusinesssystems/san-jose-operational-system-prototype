@@ -1,0 +1,60 @@
+/* Final readiness pass: clearer spacing, readable controls, and resilient states. */
+
+.route-error-actions {
+  margin: 16px 14px 14px;
+}
+
+.admin-workspace,
+.admin-workspace > *,
+.admin-secondary,
+.admin-hero {
+  min-width: 0;
+}
+
+.admin-workspace select[name="role"] {
+  width: 100%;
+}
+
+.dashboard-exceptions {
+  grid-template-columns: 1fr;
+}
+
+.dashboard-exceptions .table-wrap {
+  max-height: 520px;
+  overflow: auto;
+}
+
+.dashboard-metric > span,
+.dashboard-metric small {
+  line-height: 1.4;
+}
+
+@media (min-width: 1181px) {
+  .dashboard-metrics {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 14px;
+  }
+
+  .dashboard-metric {
+    min-height: 150px;
+    padding: 16px;
+  }
+}
+
+@media (max-width: 700px) {
+  .dashboard-exceptions .table-wrap {
+    max-height: none;
+  }
+
+  .po-line-title button,
+  .po-remove-line,
+  .sales-line-item button,
+  .rack-step-button {
+    min-height: 46px !important;
+    min-width: 46px !important;
+  }
+
+  .route-error-actions .btn {
+    width: 100%;
+  }
+}

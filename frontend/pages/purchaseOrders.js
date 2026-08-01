@@ -1,4 +1,4 @@
-import { createPurchaseOrder, getPurchaseOrderDetail, listProducts, listPurchaseOrders, listSuppliers, purchaseOrderAction } from "../js/api-smooth1.js?v=qa1";
+import { createPurchaseOrder, getPurchaseOrderDetail, listProducts, listPurchaseOrders, listSuppliers, purchaseOrderAction } from "../js/api-smooth1.js?v=data-audit1";
 import { can } from "../js/permissions.js";
 import { escapeHtml, formatMoney, formatQuantity, notice, status, table } from "../js/utils.js";
 
@@ -30,7 +30,7 @@ export async function render(ctx) {
           { label: "PO", key: "po_id", sortable: true },
           { label: "Date", sortable: true, sortValue: (row) => normalizedDate(row.order_date), render: (row) => escapeHtml(formatDate(row.order_date)) },
           { label: "Supplier", sortable: true, sortValue: (row) => row.supplier?.supplier_name || row.supplier_id || "", render: (row) => escapeHtml(row.supplier?.supplier_name || row.supplier_id) },
-          { label: "Products", sortable: true, sortType: "number", sortValue: (row) => Number(row.line_count || 0), render: (row) => escapeHtml(row.line_count || 0) },
+          { label: "Products", sortable: true, sortType: "number", sortValue: (row) => purchaseOrderLineCount(row) ?? -1, render: (row) => escapeHtml(purchaseOrderLineCount(row) ?? "—") },
           { label: "Total", sortable: true, sortType: "number", sortValue: (row) => Number(row.total_amount || 0), render: (row) => money(row.total_amount) },
           { label: "Status", sortable: true, sortValue: (row) => row.po_status || "", render: (row) => status(row.po_status) },
           { label: "Actions", render: (row) => actionButtons(ctx, row) }
@@ -60,10 +60,11 @@ function installPurchaseOrderExplorer(root, purchaseOrders) {
     row.dataset.orderPo = String(order.po_id || "");
     row.dataset.orderDate = normalizedDate(order.order_date);
     row.dataset.orderSupplier = supplier;
-    row.dataset.orderProducts = String(Number(order.line_count || 0));
+    const lineCount = purchaseOrderLineCount(order);
+    row.dataset.orderProducts = String(lineCount ?? -1);
     row.dataset.orderTotal = String(Number(order.total_amount || 0));
     row.dataset.orderStatus = orderStatus;
-    row.dataset.orderSearch = [order.po_id, supplier, orderStatus, order.line_count, order.total_amount].join(" ").toLowerCase();
+    row.dataset.orderSearch = [order.po_id, supplier, orderStatus, lineCount ?? "", order.total_amount].join(" ").toLowerCase();
     row.dataset.orderOriginalIndex = String(index);
     if (supplier) supplierValues.add(supplier);
     if (orderStatus) statusValues.add(orderStatus);
@@ -643,6 +644,13 @@ function numericLineValue(lineElement, field) {
 
 function normalizeLookup(value) {
   return String(value || "").trim().toLowerCase();
+}
+
+function purchaseOrderLineCount(order) {
+  const value = order?.line_count ?? (Array.isArray(order?.lines) ? order.lines.length : null);
+  if (value === null || value === undefined || value === "") return null;
+  const count = Number(value);
+  return Number.isFinite(count) && count >= 0 ? count : null;
 }
 
 function isActive(record) {

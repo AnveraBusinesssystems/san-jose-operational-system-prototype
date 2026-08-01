@@ -105,39 +105,38 @@
   display: none !important;
 }
 
-.product-dashboard button.report-command-option {
+.product-dashboard .report-command-menu button.report-command-option,
+.product-dashboard .report-command-menu button.report-command-option.selected {
   align-items: center !important;
-  background: #fff !important;
-  border: 1px solid transparent !important;
+  background: #ffffff !important;
+  border: 1px solid #d6dfd9 !important;
   border-radius: 9px !important;
   box-shadow: none !important;
-  color: #173023 !important;
+  color: #151a17 !important;
   display: grid !important;
   gap: 11px !important;
   grid-template-columns: 34px minmax(0, 1fr) auto !important;
   min-height: 57px !important;
   padding: 9px 10px !important;
   text-align: left !important;
+  transition: background-color 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
   width: 100%;
 }
 
-.product-dashboard button.report-command-option:hover,
-.product-dashboard button.report-command-option:focus-visible {
-  background: #f5f9f6 !important;
-  border-color: #cddbd1 !important;
+.product-dashboard .report-command-menu button.report-command-option:hover,
+.product-dashboard .report-command-menu button.report-command-option:focus-visible {
+  background: #eaf5ed !important;
+  border-color: #9fc5aa !important;
+  box-shadow: inset 3px 0 0 #2f7a50 !important;
+  color: #111713 !important;
   outline: 0 !important;
 }
 
-.product-dashboard button.report-command-option.selected {
-  background: #edf6f0 !important;
-  border-color: #bdd4c4 !important;
-}
-
-.report-command-avatar {
+.product-dashboard .report-command-menu .report-command-avatar {
   align-items: center;
-  background: #edf3ef;
+  background: #f2f5f3 !important;
   border-radius: 8px;
-  color: #345b43;
+  color: #1b211d !important;
   display: flex;
   font-size: 12px;
   font-weight: 900;
@@ -146,9 +145,9 @@
   width: 34px;
 }
 
-.report-command-avatar.overview {
-  background: #dfeee4;
-  color: #17613c;
+.product-dashboard .report-command-menu .report-command-avatar.overview {
+  background: #f2f5f3 !important;
+  color: #1b211d !important;
   font-size: 16px;
 }
 
@@ -158,8 +157,8 @@
   min-width: 0;
 }
 
-.report-command-copy strong {
-  color: #163022 !important;
+.product-dashboard .report-command-menu .report-command-copy strong {
+  color: #202722 !important;
   font-size: 13px !important;
   font-weight: 800 !important;
   overflow: hidden;
@@ -167,14 +166,14 @@
   white-space: nowrap;
 }
 
-.report-command-copy small {
-  color: #718178 !important;
+.product-dashboard .report-command-menu .report-command-copy small {
+  color: #202722 !important;
   font-size: 10px !important;
   line-height: 1.35;
 }
 
-.report-command-action {
-  color: #267048;
+.product-dashboard .report-command-menu .report-command-action {
+  color: #202722 !important;
   font-size: 10px;
   font-weight: 850;
   white-space: nowrap;

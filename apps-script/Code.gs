@@ -578,9 +578,15 @@ function listLocations() {
 
 function listPurchaseOrders() {
   const suppliers = byId_(readTable_("SUPPLIERS"), "supplier_id");
+  const lineCounts = {};
+  readTable_("PURCHASE_ORDER_LINES").forEach((line) => {
+    const poId = String(line.po_id || "").trim();
+    if (poId) lineCounts[poId] = number_(lineCounts[poId], 0) + 1;
+  });
   return readTable_("PURCHASE_ORDERS").map((po) => ({
     ...purchaseOrderForApi_(po),
-    supplier: suppliers[po.supplier_id] || null
+    supplier: suppliers[po.supplier_id] || null,
+    line_count: number_(lineCounts[String(po.po_id || "")], 0)
   })).sort((a, b) => String(b.order_date || "").localeCompare(String(a.order_date || "")));
 }
 
@@ -2146,6 +2152,7 @@ function getRackInventory() {
       level: location.level || "",
       bin: location.bin || "",
       zone: location.zone || "",
+      location_type: location.location_type || "",
       location_status: staleOccupiedStatus ? "AVAILABLE" : location.current_status || "AVAILABLE",
       can_add_inventory: staleOccupiedStatus || !locationHardBlockReason_(location),
       occupied: Boolean(current),

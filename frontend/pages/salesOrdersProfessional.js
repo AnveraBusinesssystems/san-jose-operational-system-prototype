@@ -1,5 +1,5 @@
-import { render as renderLegacySalesOrders } from "./salesOrders.js?v=order-filters1";
-import { getSalesOrderDetail, listSalesOrders } from "../js/api-smooth1.js?v=orders1";
+import { render as renderLegacySalesOrders } from "./salesOrders.js?v=data-audit1";
+import { getSalesOrderDetail, listSalesOrders } from "../js/api-smooth1.js?v=data-audit1";
 import { installDeliveryActions, replaceAdminDeliveryActions } from "../js/salesDelivery.js?v=delivery1";
 
 export async function render(ctx) {

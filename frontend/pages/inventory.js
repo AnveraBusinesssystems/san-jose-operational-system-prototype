@@ -1,4 +1,4 @@
-import { clearApiCache, getRackInventory, listProducts, saveRackInventory } from "../js/api-smooth1.js?v=rack-inventory4";
+import { clearApiCache, getRackInventory, listProducts, saveRackInventory } from "../js/api-smooth1.js?v=data-audit1";
 import { can } from "../js/permissions.js?v=rack-inventory4";
 import { escapeHtml, formatQuantity, notice } from "../js/utils.js?v=rack-inventory4";
 
@@ -8,6 +8,7 @@ let selectedRack = "";
 let productFilter = "";
 let inventoryData = null;
 let products = [];
+let activeSection = "racks";
 
 export async function render(ctx) {
   ctx.setTitle("Rack Inventory", "View and correct the actual inventory in each warehouse space");
@@ -16,7 +17,10 @@ export async function render(ctx) {
 }
 
 function renderPage(ctx, options = {}) {
-  const spaces = Array.isArray(inventoryData?.spaces) ? inventoryData.spaces : [];
+  const normalizedLocations = normalizeInventoryLocations(inventoryData);
+  const spaces = normalizedLocations.spaces;
+  const otherLocations = normalizedLocations.otherLocations;
+  const totalRackCount = new Set(spaces.map((space) => space.rack).filter(Boolean)).size;
   let racks = filteredRacks(spaces, productFilter);
   const preferredRack = options.preferredRack || selectedRack;
   const preferredRackExists = spaces.some((space) => space.rack === preferredRack);
@@ -33,26 +37,32 @@ function renderPage(ctx, options = {}) {
 
   ctx.view.innerHTML = `
     <section class="rack-inventory-page">
-      <section class="panel rack-inventory-toolbar">
-        <form id="rackProductFilterForm" class="rack-product-filter">
-          <div class="field">
-            <label for="rackProductFilter">Find product</label>
-            <input id="rackProductFilter" list="rackProductFilterOptions" value="${escapeHtml(productFilter)}" placeholder="All products" autocomplete="off">
-            <datalist id="rackProductFilterOptions">
-              ${products.map((product) => `<option value="${escapeHtml(product.product_name)}"></option>`).join("")}
-            </datalist>
-          </div>
-          <button class="btn" type="submit">Filter racks</button>
-          <button id="clearRackFilter" class="btn secondary" type="button" ${productFilter ? "" : "disabled"}>Clear</button>
-        </form>
-        <div class="rack-inventory-status" aria-live="polite">
-          <span><strong>${racks.length}</strong> rack${racks.length === 1 ? "" : "s"}</span>
-          <span><strong>${occupied}</strong> / 9 occupied</span>
-          ${inventoryData?.conflict_count ? `<span class="rack-conflict-count"><strong>${inventoryData.conflict_count}</strong> conflict${inventoryData.conflict_count === 1 ? "" : "s"}</span>` : ""}
-        </div>
-      </section>
+      <nav class="panel rack-inventory-tabs" aria-label="Inventory location type">
+        <button type="button" data-inventory-section="racks" class="${activeSection === "racks" ? "active" : ""}">Racks <span>${totalRackCount}</span></button>
+        <button type="button" data-inventory-section="others" class="${activeSection === "others" ? "active" : ""}">Floor &amp; Packing <span>${otherLocations.length}</span></button>
+      </nav>
 
-      ${selectedRack ? `
+      ${activeSection === "racks" ? `
+        <section class="panel rack-inventory-toolbar">
+          <form id="rackProductFilterForm" class="rack-product-filter">
+            <div class="field">
+              <label for="rackProductFilter">Find product</label>
+              <input id="rackProductFilter" list="rackProductFilterOptions" value="${escapeHtml(productFilter)}" placeholder="All products" autocomplete="off">
+              <datalist id="rackProductFilterOptions">
+                ${products.map((product) => `<option value="${escapeHtml(product.product_name)}"></option>`).join("")}
+              </datalist>
+            </div>
+            <button class="btn" type="submit">Filter racks</button>
+            <button id="clearRackFilter" class="btn secondary" type="button" ${productFilter ? "" : "disabled"}>Clear</button>
+          </form>
+          <div class="rack-inventory-status" aria-live="polite">
+            <span><strong>${racks.length}</strong> rack${racks.length === 1 ? "" : "s"}</span>
+            <span><strong>${occupied}</strong> / 9 occupied</span>
+            ${inventoryData?.conflict_count ? `<span class="rack-conflict-count"><strong>${inventoryData.conflict_count}</strong> conflict${inventoryData.conflict_count === 1 ? "" : "s"}</span>` : ""}
+          </div>
+        </section>
+
+        ${selectedRack ? `
         <section class="panel rack-board-panel">
           <header class="rack-board-heading">
             <button class="rack-step-button" type="button" data-rack-step="-1" aria-label="Previous rack">‹</button>
@@ -80,12 +90,13 @@ function renderPage(ctx, options = {}) {
         <nav class="rack-selector" aria-label="Choose rack">
           ${racks.map((rack) => `<button type="button" data-rack="${escapeHtml(rack)}" class="${rack === selectedRack ? "active" : ""}">${escapeHtml(rack)}</button>`).join("")}
         </nav>
-      ` : `
+        ` : `
         <section class="panel rack-empty-result">
           <h2>No matching racks</h2>
           <p>Clear the product filter or search for another product.</p>
         </section>
-      `}
+        `}
+      ` : otherLocationsHtml(otherLocations)}
     </section>
     <section id="rackEditor" class="rack-editor" hidden aria-label="Edit rack inventory">
       <button class="rack-editor-backdrop" type="button" data-close-rack-editor aria-label="Close inventory editor"></button>
@@ -97,6 +108,66 @@ function renderPage(ctx, options = {}) {
 
   bindPageEvents(ctx, racks, editable);
   restoreRackView(options);
+}
+
+function normalizeInventoryLocations(data) {
+  const allSpaces = Array.isArray(data?.spaces) ? data.spaces : [];
+  const spaces = allSpaces.filter(isPalletRackSpace);
+  const otherById = new Map((Array.isArray(data?.other_locations) ? data.other_locations : [])
+    .map((location) => [String(location.location_id || ""), { ...location, items: Array.isArray(location.items) ? location.items : [] }]));
+
+  allSpaces.filter((space) => !isPalletRackSpace(space)).forEach((space) => {
+    const locationId = String(space.location_id || "").trim();
+    if (!locationId) return;
+    const existing = otherById.get(locationId) || {
+      location_id: locationId,
+      location_type: space.location_type || inferredOtherLocationType(locationId),
+      items: []
+    };
+    if (space.occupied && !existing.items.some((item) => item.internal_lot_id === space.internal_lot_id)) {
+      existing.items.push(space);
+    }
+    otherById.set(locationId, existing);
+  });
+
+  return {
+    spaces,
+    otherLocations: Array.from(otherById.values())
+      .sort((a, b) => String(a.location_id).localeCompare(String(b.location_id), undefined, { numeric: true }))
+  };
+}
+
+function isPalletRackSpace(space) {
+  const id = String(space?.location_id || "").trim().toUpperCase();
+  const type = String(space?.location_type || "").trim().toUpperCase();
+  if (/^FLOOR-\d+$/.test(id) || id === "PACKING") return false;
+  if (type) return type === "PALLET_RACK" || type === "RACK";
+  return /^R\d+-L\d+-(F|M|B)$/.test(id);
+}
+
+function inferredOtherLocationType(locationId) {
+  return String(locationId).toUpperCase() === "PACKING" ? "PACKING_AREA" : "FLOOR_STORAGE";
+}
+
+function otherLocationsHtml(locations) {
+  if (!locations.length) {
+    return `<section class="panel rack-empty-result"><h2>No floor or Packing locations</h2><p>These locations will appear here when configured.</p></section>`;
+  }
+  return `<section class="rack-other-locations">
+    ${locations.map((location) => `<article class="panel rack-other-location">
+      <header><div><span>${escapeHtml(displayLocationType(location.location_type))}</span><h2>${escapeHtml(location.location_id)}</h2></div><strong>${location.items.length} active lot${location.items.length === 1 ? "" : "s"}</strong></header>
+      <div class="rack-other-list">${location.items.length
+        ? location.items.map((item) => `<div class="rack-other-row"><div><strong>${escapeHtml(item.product_name || item.product_id)}</strong><span>Lot ${escapeHtml(item.supplier_lot_number || item.internal_lot_id || "—")}</span></div><div><strong>${escapeHtml(formatPurchaseUnits(item.current_purchase_units))} ${escapeHtml(item.purchase_unit_type || "units")}</strong><span>${escapeHtml(formatQuantity(item.current_base_qty))} ${escapeHtml(item.base_unit || "LB")}</span></div></div>`).join("")
+        : `<p class="rack-other-empty">No inventory currently stored here.</p>`}</div>
+    </article>`).join("")}
+  </section>`;
+}
+
+function displayLocationType(value) {
+  const type = String(value || "OTHER").toUpperCase();
+  if (type === "FLOOR_STORAGE") return "Floor storage";
+  if (type === "PACKING_AREA") return "Packing area";
+  return type.replaceAll("_", " ");
 }
 
 function restoreRackView(options) {
@@ -150,6 +221,12 @@ function rackSpaceHtml(space, editable) {
 }
 
 function bindPageEvents(ctx, racks, editable) {
+  ctx.view.querySelectorAll("[data-inventory-section]").forEach((button) => {
+    button.addEventListener("click", () => {
+      activeSection = button.dataset.inventorySection;
+      renderPage(ctx);
+    });
+  });
   document.getElementById("rackProductFilterForm")?.addEventListener("submit", (event) => {
     event.preventDefault();
     productFilter = document.getElementById("rackProductFilter").value.trim();
