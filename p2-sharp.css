@@ -1,0 +1,100 @@
+:root{--radius:2px}
+
+/* Enterprise visual language: square geometry, restrained rounding */
+.brand-block img,
+.nav-item,
+.signed-user .avatar,
+.global-search,
+.icon-btn,
+.primary-btn,
+.secondary-btn,
+.ghost-btn,
+.metric-card,
+.panel,
+.metric-trend,
+.toolbar input,
+.toolbar select,
+.field input,
+.field select,
+.field textarea,
+.chip,
+.status,
+.tabs,
+.tab-btn,
+.rack-space,
+.rack-selector button,
+.stock-item,
+.progress,
+.kanban-col,
+.kanban-head span,
+.kanban-card,
+.drawer-close,
+.quick-tile,
+.notice-banner,
+.line-row,
+.order-summary,
+.scorecard,
+.toast,
+.packing-mini-btn,
+.balance-pill,
+.packing-guide,
+.drawer-amount-preview,
+.table-sort-control{
+  border-radius:2px !important;
+}
+
+/* Keep only true indicators circular */
+.priority-dot,
+.notification-btn i,
+.env-pill span,
+.status::before,
+.balance-pill::before,
+.movement-type::before{
+  border-radius:50% !important;
+}
+
+/* Slightly flatter surfaces for a denser operations-console feel */
+.metric-card,
+.panel,
+.quick-tile,
+.scorecard,
+.kanban-card{
+  box-shadow:none !important;
+}
+
+.nav-item.active{
+  box-shadow:none !important;
+}
+
+.tabs{
+  border:1px solid var(--line);
+  background:#f7f9f8;
+}
+
+.tab-btn.active{
+  box-shadow:none !important;
+  border:1px solid #d8e3dd;
+}
+
+.progress span{
+  border-radius:0 !important;
+}
+
+.drawer-panel{
+  box-shadow:-8px 0 24px rgba(14,35,27,.12);
+}
+
+/* Tables should read like operating grids rather than floating cards */
+.data-table th,
+.data-table td{
+  border-radius:0 !important;
+}
+
+/* Keep inputs crisp and compact */
+.toolbar input:focus,
+.toolbar select:focus,
+.field input:focus,
+.field select:focus,
+.field textarea:focus{
+  box-shadow:inset 3px 0 0 var(--green-700) !important;
+}
