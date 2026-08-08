@@ -1,0 +1,2 @@
+.drawer.order-builder-mode .drawer-panel{width:min(920px,96vw)}
+.order-builder{display:grid;gap:18px}.order-builder .drawer-section{margin-bottom:0}.order-header-grid{display:grid;grid-template-columns:1.4fr 1fr 1fr 1fr;gap:10px}.invoice-field{position:relative}.invoice-state{min-height:16px;margin-top:4px;font-size:9px;font-weight:750}.invoice-state.ok{color:var(--success)}.invoice-state.error{color:var(--danger)}.invoice-input.error{border-color:#d
