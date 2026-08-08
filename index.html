@@ -1,14 +1,54 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>San Jose Operations Prototype</title>
-    <meta http-equiv="refresh" content="0; url=./frontend/">
-    <link rel="canonical" href="./frontend/">
-  </head>
-  <body>
-    <p>Opening San Jose Operations Prototype...</p>
-    <p><a href="./frontend/">Open the app</a></p>
-  </body>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>San Jose Operations · P2</title>
+  <meta name="description" content="San Jose Produce & Imports operations platform concept">
+  <link rel="icon" type="image/png" href="./logo_San_Jose.png">
+  <link rel="stylesheet" href="./p2.css?v=1">
+  <script defer src="./p2.js?v=1"></script>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand-block">
+        <img src="./logo_San_Jose.png" alt="San Jose Produce & Imports">
+        <div><strong>San Jose</strong><span>Operations</span></div>
+      </div>
+      <nav id="sidebarNav" class="sidebar-nav" aria-label="Primary navigation"></nav>
+      <div class="sidebar-footer">
+        <div class="env-pill"><span></span> P2 concept workspace</div>
+        <div class="signed-user"><div class="avatar">AR</div><div><strong>Angel Ramirez</strong><span>Operations Admin</span></div></div>
+      </div>
+    </aside>
+
+    <main class="workspace">
+      <header class="topbar">
+        <div class="page-heading">
+          <span id="breadcrumb" class="breadcrumb">Overview</span>
+          <h1 id="pageTitle">Operations Center</h1>
+        </div>
+        <div class="topbar-actions">
+          <label class="global-search"><span aria-hidden="true">⌕</span><input id="globalSearch" type="search" placeholder="Search orders, products, lots..."></label>
+          <button id="densityToggle" class="icon-btn" type="button" title="Toggle table density">≡</button>
+          <button id="notifyButton" class="icon-btn notification-btn" type="button" title="Notifications">◔<i></i></button>
+          <button id="quickCreate" class="primary-btn" type="button">+ Create</button>
+        </div>
+      </header>
+
+      <section id="pageView" class="page-view" aria-live="polite"></section>
+    </main>
+  </div>
+
+  <aside id="detailDrawer" class="drawer" hidden>
+    <button class="drawer-backdrop" data-close-drawer aria-label="Close details"></button>
+    <section class="drawer-panel" role="dialog" aria-modal="true" aria-labelledby="drawerTitle">
+      <div class="drawer-head"><div><span id="drawerEyebrow" class="eyebrow">DETAILS</span><h2 id="drawerTitle"></h2></div><button data-close-drawer class="drawer-close" type="button">×</button></div>
+      <div id="drawerBody" class="drawer-body"></div>
+    </section>
+  </aside>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+</body>
 </html>
