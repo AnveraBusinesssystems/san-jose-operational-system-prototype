@@ -1,9 +1,13 @@
 (() => {
   const API_URL=String(window.SAN_JOSE_P2_API_URL||'').trim();
   const WRITES_ENABLED=window.SAN_JOSE_P2_INVENTORY_WRITES_ENABLED===true;
-  const liveState={boot:null,loading:false,error:'',query:'',selectedArea:'R01',lastLoadedAt:null};
-  const esc=s=>String(s??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
+  const WRITE_USER_ID=String(window.SAN_JOSE_P2_INVENTORY_USER_ID||'ANGEL').trim()||'ANGEL';
+  const WRITE_TOKEN_KEY='sj_p2_inventory_write_token';
+  const liveState={boot:null,apiInfo:null,loading:false,error:'',query:'',selectedArea:'R01',lastLoadedAt:null,writing:false};
+  const esc=s=>String(s??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt',"'":'&#39;','"':'&quot;'}[c]));
   const fmt=n=>new Intl.NumberFormat('en-US',{maximumFractionDigits:2}).format(Number(n||0));
+  const number=v=>{const n=Number(v);return Number.isFinite(n)?n:0;};
+  const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 
   function api(action,payload={}){
     if(!API_URL)return Promise.reject(new Error('Inventory API URL is not configured.'));
@@ -17,187 +21,113 @@
       let finished=false;
       const cleanup=()=>{if(finished)return;finished=true;clearTimeout(timer);try{delete window[cb];}catch(_e){}script.remove();};
       const timer=setTimeout(()=>{cleanup();reject(new Error('Inventory API timed out after 20 seconds.'));},20000);
-      window[cb]=data=>{
-        cleanup();
-        if(data&&data.ok)resolve(data.result);
-        else reject(new Error(data?.error||'Inventory API returned an error.'));
-      };
+      window[cb]=data=>{cleanup();if(data&&data.ok)resolve(data.result);else reject(new Error(data?.error||'Inventory API returned an error.'));};
       script.onerror=()=>{cleanup();reject(new Error('Could not execute the Apps Script inventory response. Check deployment access and version.'));};
-      script.src=url.toString();
-      document.body.appendChild(script);
+      script.src=url.toString();document.body.appendChild(script);
     });
   }
 
-  function number(v){const n=Number(v);return Number.isFinite(n)?n:0;}
+  function getWriteToken(){try{return sessionStorage.getItem(WRITE_TOKEN_KEY)||'';}catch(_e){return '';}}
+  function setWriteToken(value){try{if(value)sessionStorage.setItem(WRITE_TOKEN_KEY,value);else sessionStorage.removeItem(WRITE_TOKEN_KEY);}catch(_e){}}
+  function writeSecurity(){const s=liveState.apiInfo?.write_security||{};return {backendEnabled:s.writes_enabled===true,tokenConfigured:s.write_token_configured===true,unlocked:Boolean(getWriteToken())};}
+  function ensureWriteAccess(){
+    if(!WRITES_ENABLED){showToast?.('Inventory correction UI is disabled in the website configuration.','error');return false;}
+    const s=writeSecurity();
+    if(!s.backendEnabled||!s.tokenConfigured){openDrawer('INVENTORY CORRECTIONS','Backend setup required',`<div class="count-step-note">The website is ready, but the Apps Script deployment still needs both Script Properties: <strong>INVENTORY_WRITES_ENABLED = TRUE</strong> and <strong>INVENTORY_WRITE_TOKEN = your private key</strong>. The key must stay out of GitHub.</div>`);return false;}
+    if(!s.unlocked){const token=window.prompt('Enter the private inventory write key for this browser tab. It is stored only in sessionStorage and is not saved in GitHub.');if(!token)return false;setWriteToken(token.trim());}
+    return Boolean(getWriteToken());
+  }
 
   function normalizeBoot(raw){
     raw=raw&&typeof raw==='object'?raw:{};
-    const products=Array.isArray(raw.products)?raw.products.map(p=>({...p})):[];
+    const products=Array.isArray(raw.products)?raw.products.map(p=>({...p,units:Array.isArray(p.units)?p.units.map(u=>({...u})):[]})):[];
     const locations=Array.isArray(raw.locations)?raw.locations.map(l=>({...l,location_id:String(l.location_id||'').toUpperCase(),location_type:String(l.location_type||'').toUpperCase(),rack:String(l.rack||'').toUpperCase(),level:String(l.level||'').toUpperCase(),position:String(l.position||'').toUpperCase()})):[];
     let balances=Array.isArray(raw.balances)?raw.balances.map(b=>({...b})):[];
-
-    // Backward compatibility with the immediately previous P2 inventory deployment,
-    // where stock lines were nested inside each product instead of returned as boot.balances.
-    if(!balances.length){
-      products.forEach(p=>{
-        (Array.isArray(p.stock)?p.stock:[]).forEach(s=>balances.push({
-          ...s,
-          product_id:p.product_id,
-          product_name:p.product_name,
-          category:p.category,
-          base_unit:p.base_unit,
-          lot_unit:s.lot_unit||s.unit_code||'',
-          lot_conversion_to_base:number(s.lot_conversion_to_base||s.conversion_to_base||1),
-          last_movement_sequence:number(s.last_movement_sequence||0)
-        }));
-      });
-    }
-
-    const productMap=new Map(products.map(p=>[String(p.product_id||''),p]));
-    const locationMap=new Map(locations.map(l=>[String(l.location_id||''),l]));
-    balances=balances.filter(b=>number(b.current_base_qty)>0).map(b=>{
-      const p=productMap.get(String(b.product_id||''))||{};
-      const l=locationMap.get(String(b.location_id||'').toUpperCase())||{};
-      return {
-        ...b,
-        product_id:String(b.product_id||''),
-        product_name:String(b.product_name||p.product_name||''),
-        category:String(b.category||p.category||''),
-        base_unit:String(b.base_unit||p.base_unit||'').toUpperCase(),
-        location_id:String(b.location_id||'').toUpperCase(),
-        location_type:String(b.location_type||l.location_type||'').toUpperCase(),
-        rack:String(b.rack||l.rack||'').toUpperCase(),
-        level:String(b.level||l.level||'').toUpperCase(),
-        position:String(b.position||l.position||'').toUpperCase(),
-        lot_unit:String(b.lot_unit||b.unit_code||'').toUpperCase(),
-        lot_conversion_to_base:number(b.lot_conversion_to_base||b.conversion_to_base||1),
-        current_base_qty:number(b.current_base_qty),
-        last_movement_sequence:number(b.last_movement_sequence||0)
-      };
-    });
-
-    const byProduct={};
-    balances.forEach(b=>{byProduct[b.product_id]=(byProduct[b.product_id]||0)+b.current_base_qty;});
-    products.forEach(p=>{p.base_unit=String(p.base_unit||'').toUpperCase();p.on_hand_base=Number.isFinite(Number(p.on_hand_base))?Number(p.on_hand_base):(byProduct[p.product_id]||0);});
-
-    const summary=raw.summary&&typeof raw.summary==='object'?{...raw.summary}:{};
-    if(!summary.by_base_unit){
-      summary.by_base_unit={};
-      balances.forEach(b=>{const unit=b.base_unit||'UNKNOWN';summary.by_base_unit[unit]=(summary.by_base_unit[unit]||0)+b.current_base_qty;});
-    }
-    const activeRack=locations.filter(l=>l.location_type==='RACK').length;
-    const occupiedRack=new Set(balances.filter(b=>b.location_type==='RACK'||String(b.location_id).startsWith('R')).map(b=>b.location_id)).size;
-    if(summary.positive_balance_lines==null)summary.positive_balance_lines=balances.length;
-    if(summary.active_rack_locations==null)summary.active_rack_locations=activeRack;
-    if(summary.occupied_rack_locations==null)summary.occupied_rack_locations=occupiedRack;
-    if(summary.open_rack_locations==null)summary.open_rack_locations=Math.max(0,activeRack-occupiedRack);
-    if(summary.active_locations==null)summary.active_locations=locations.length;
-
+    if(!balances.length){products.forEach(p=>{(Array.isArray(p.stock)?p.stock:[]).forEach(s=>balances.push({...s,product_id:p.product_id,product_name:p.product_name,category:p.category,base_unit:p.base_unit,lot_unit:s.lot_unit||s.unit_code||'',lot_conversion_to_base:number(s.lot_conversion_to_base||s.conversion_to_base||1),last_movement_sequence:number(s.last_movement_sequence||0)}));});}
+    const productMap=new Map(products.map(p=>[String(p.product_id||''),p]));const locationMap=new Map(locations.map(l=>[String(l.location_id||''),l]));
+    balances=balances.filter(b=>number(b.current_base_qty)>0).map(b=>{const p=productMap.get(String(b.product_id||''))||{},l=locationMap.get(String(b.location_id||'').toUpperCase())||{};return {...b,product_id:String(b.product_id||''),product_name:String(b.product_name||p.product_name||''),category:String(b.category||p.category||''),base_unit:String(b.base_unit||p.base_unit||'').toUpperCase(),location_id:String(b.location_id||'').toUpperCase(),location_type:String(b.location_type||l.location_type||'').toUpperCase(),rack:String(b.rack||l.rack||'').toUpperCase(),level:String(b.level||l.level||'').toUpperCase(),position:String(b.position||l.position||'').toUpperCase(),lot_unit:String(b.lot_unit||b.unit_code||'').toUpperCase(),lot_conversion_to_base:number(b.lot_conversion_to_base||b.conversion_to_base||1),current_base_qty:number(b.current_base_qty),last_movement_sequence:number(b.last_movement_sequence||0)};});
+    const byProduct={};balances.forEach(b=>{byProduct[b.product_id]=(byProduct[b.product_id]||0)+b.current_base_qty;});products.forEach(p=>{p.base_unit=String(p.base_unit||'').toUpperCase();p.on_hand_base=Number.isFinite(Number(p.on_hand_base))?Number(p.on_hand_base):(byProduct[p.product_id]||0);});
+    const summary=raw.summary&&typeof raw.summary==='object'?{...raw.summary}:{};if(!summary.by_base_unit){summary.by_base_unit={};balances.forEach(b=>{const unit=b.base_unit||'UNKNOWN';summary.by_base_unit[unit]=(summary.by_base_unit[unit]||0)+b.current_base_qty;});}
+    const activeRack=locations.filter(l=>l.location_type==='RACK').length,occupiedRack=new Set(balances.filter(b=>b.location_type==='RACK'||String(b.location_id).startsWith('R')).map(b=>b.location_id)).size;
+    if(summary.positive_balance_lines==null)summary.positive_balance_lines=balances.length;if(summary.active_rack_locations==null)summary.active_rack_locations=activeRack;if(summary.occupied_rack_locations==null)summary.occupied_rack_locations=occupiedRack;if(summary.open_rack_locations==null)summary.open_rack_locations=Math.max(0,activeRack-occupiedRack);if(summary.active_locations==null)summary.active_locations=locations.length;
     return {...raw,version:String(raw.version||'legacy-inventory-api'),products,locations,balances,summary};
   }
 
   async function load(force=false){
-    if(liveState.loading)return;
-    if(liveState.boot&&!force)return;
-    liveState.loading=true;
-    liveState.error='';
-    if(force)liveState.boot=null;
-    try{
-      const raw=await api('inventoryBootstrap');
-      liveState.boot=normalizeBoot(raw);
-      liveState.lastLoadedAt=new Date();
-      if(!liveState.boot.products.length)throw new Error('Inventory API connected but returned zero active products.');
-      if(!liveState.boot.locations.length)throw new Error('Inventory API connected but returned zero active locations.');
-    }catch(e){
-      liveState.boot=null;
-      liveState.error=e?.message||String(e);
-    }finally{
-      liveState.loading=false;
-    }
+    if(liveState.loading)return;if(liveState.boot&&!force)return;liveState.loading=true;liveState.error='';if(force)liveState.boot=null;
+    try{const raw=await api('inventoryBootstrap');liveState.boot=normalizeBoot(raw);try{liveState.apiInfo=await api('apiInfo');}catch(_e){liveState.apiInfo=null;}liveState.lastLoadedAt=new Date();if(!liveState.boot.products.length)throw new Error('Inventory API connected but returned zero active products.');if(!liveState.boot.locations.length)throw new Error('Inventory API connected but returned zero active locations.');}
+    catch(e){liveState.boot=null;liveState.error=e?.message||String(e);}finally{liveState.loading=false;}
   }
 
   function balancesForProduct(productId){return (liveState.boot?.balances||[]).filter(b=>b.product_id===productId);}
-  function productRows(){
-    const rows=(liveState.boot?.products||[]).map(p=>({...p,stock:balancesForProduct(p.product_id)}));
-    const q=liveState.query.trim().toLowerCase();
-    return rows.filter(p=>!q||`${p.product_id} ${p.product_name} ${p.category} ${p.barcode||''}`.toLowerCase().includes(q)).sort((a,b)=>String(a.product_name||'').localeCompare(String(b.product_name||'')));
-  }
-  function storageSpaces(area){
-    const locations=liveState.boot?.locations||[];
-    const balances=liveState.boot?.balances||[];
-    if(/^R\d{2}$/.test(area)){
-      return locations.filter(l=>l.rack===area).map(l=>({...l,stock:balances.filter(b=>b.location_id===l.location_id)}));
-    }
-    const l=locations.find(x=>x.location_id===area);
-    return l?[{...l,stock:balances.filter(b=>b.location_id===area)}]:[];
-  }
+  function productRows(){const rows=(liveState.boot?.products||[]).map(p=>({...p,stock:balancesForProduct(p.product_id)})),q=liveState.query.trim().toLowerCase();return rows.filter(p=>!q||`${p.product_id} ${p.product_name} ${p.category} ${p.barcode||''}`.toLowerCase().includes(q)).sort((a,b)=>String(a.product_name||'').localeCompare(String(b.product_name||'')));}
+  function rackSort(a,b){const levels={L3:0,L2:1,L1:2},positions={F:0,M:1,B:2};return (levels[a.level]??9)-(levels[b.level]??9)||(positions[a.position]??9)-(positions[b.position]??9)||a.location_id.localeCompare(b.location_id);}
+  function storageSpaces(area){const locations=liveState.boot?.locations||[],balances=liveState.boot?.balances||[];if(/^R\d{2}$/.test(area))return locations.filter(l=>l.rack===area).slice().sort(rackSort).map(l=>({...l,stock:balances.filter(b=>b.location_id===l.location_id)}));const l=locations.find(x=>x.location_id===area);return l?[{...l,stock:balances.filter(b=>b.location_id===area)}]:[];}
+  function stockLine(productId,lotId,locationId){return (liveState.boot?.balances||[]).find(b=>b.product_id===productId&&b.lot_id===lotId&&b.location_id===locationId)||null;}
+  function productAtLocationBase(productId,locationId){return (liveState.boot?.balances||[]).filter(b=>b.product_id===productId&&b.location_id===locationId).reduce((s,b)=>s+number(b.current_base_qty),0);}
+  function productById(id){return (liveState.boot?.products||[]).find(p=>p.product_id===id)||null;}
+  function unitDisplay(line){const conv=number(line.lot_conversion_to_base||1),lotUnit=String(line.lot_unit||'').toUpperCase();if(lotUnit&&lotUnit!==line.base_unit&&conv>0){const units=line.current_base_qty/conv;return `${fmt(units)} ${lotUnit} · ${fmt(line.current_base_qty)} ${line.base_unit}`;}return `${fmt(line.current_base_qty)} ${line.base_unit}`;}
 
   function statusBanner(){
     if(liveState.loading)return `<div class="count-live-banner offline"><span class="count-live-dot"></span><div style="flex:1"><strong>CONNECTING TO LIVE INVENTORY</strong><span>Reading PRODUCTS, LOCATIONS, LOTS and INVENTORY_BALANCES…</span></div></div>`;
     if(liveState.error)return `<div class="count-live-banner offline"><span class="count-live-dot"></span><div style="flex:1"><strong>LIVE INVENTORY CONNECTION ERROR</strong><span>${esc(liveState.error)}</span></div><button class="secondary-btn" type="button" data-live-retry>Retry</button></div>`;
     if(!liveState.boot)return `<div class="count-live-banner offline"><span class="count-live-dot"></span><div style="flex:1"><strong>LIVE INVENTORY NOT LOADED</strong><span>No mock or fallback inventory is displayed.</span></div><button class="secondary-btn" type="button" data-live-retry>Connect</button></div>`;
-    const s=liveState.boot.summary||{};
-    const totals=Object.entries(s.by_base_unit||{}).map(([unit,qty])=>`${fmt(qty)} ${esc(unit)}`).join(' · ');
-    const when=liveState.lastLoadedAt?liveState.lastLoadedAt.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}):'';
-    return `<div class="count-live-banner"><span class="count-live-dot"></span><div style="flex:1"><strong>LIVE INVENTORY CONNECTED · READ ONLY</strong><span>${totals||'No positive stock'} · ${fmt(s.positive_balance_lines)} stock lines · ${fmt(liveState.boot.products?.length)} active products · ${fmt(s.occupied_rack_locations)}/${fmt(s.active_rack_locations)} rack spaces occupied · API ${esc(liveState.boot.version)}${when?` · loaded ${esc(when)}`:''}</span></div><button class="secondary-btn" type="button" data-live-refresh>Refresh</button><span class="status gray">WRITES OFF</span></div>`;
+    const s=liveState.boot.summary||{},totals=Object.entries(s.by_base_unit||{}).map(([unit,qty])=>`${fmt(qty)} ${esc(unit)}`).join(' · '),when=liveState.lastLoadedAt?liveState.lastLoadedAt.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}):'',security=writeSecurity();
+    let title='LIVE INVENTORY CONNECTED · READ ONLY',badge='<span class="status gray">WRITES OFF</span>',button='';
+    if(WRITES_ENABLED){if(security.backendEnabled&&security.tokenConfigured){title=security.unlocked?'LIVE INVENTORY CONNECTED · CORRECTIONS UNLOCKED':'LIVE INVENTORY CONNECTED · CORRECTIONS READY';badge=security.unlocked?'<span class="status amber">WRITE MODE</span>':'<span class="status blue">KEY REQUIRED</span>';button=`<button class="secondary-btn" type="button" data-live-unlock>${security.unlocked?'Lock corrections':'Unlock corrections'}</button>`;}else{title='LIVE INVENTORY CONNECTED · CORRECTIONS LOCKED';badge='<span class="status gray">BACKEND LOCKED</span>';}}
+    return `<div class="count-live-banner"><span class="count-live-dot"></span><div style="flex:1"><strong>${title}</strong><span>${totals||'No positive stock'} · ${fmt(s.positive_balance_lines)} stock lines · ${fmt(liveState.boot.products?.length)} active products · ${fmt(s.occupied_rack_locations)}/${fmt(s.active_rack_locations)} rack spaces occupied · API ${esc(liveState.boot.version)}${when?` · loaded ${esc(when)}`:''}</span></div>${button}<button class="secondary-btn" type="button" data-live-refresh>Refresh</button>${badge}</div>`;
   }
 
   function renderStorage(){
-    const area=liveState.selectedArea;
-    const spaces=storageSpaces(area);
-    if(!spaces.length)return `<div class="count-empty-stock"><strong>${esc(area)} not loaded</strong><span>No active location record was returned for this storage area.</span></div>`;
-    if(/^R\d{2}$/.test(area)){
-      return `<div class="rack-grid">${spaces.map(space=>`<button class="rack-space ${space.stock.length?'occupied':'available'}" type="button" data-live-location="${esc(space.location_id)}"><div class="rack-space-label"><strong>${esc(space.location_id)}</strong><span>${space.stock.length?`${space.stock.length} stock line${space.stock.length===1?'':'s'}`:'EMPTY'}</span></div>${space.stock.slice(0,3).map(s=>`<div class="rack-stock-line"><b>${esc(s.product_name)}</b><span>${fmt(s.current_base_qty)} ${esc(s.base_unit)} · ${esc(s.supplier_lot_number||s.lot_id)}</span></div>`).join('')}${space.stock.length>3?`<small>+${space.stock.length-3} more</small>`:''}</button>`).join('')}</div>`;
-    }
-    const space=spaces[0];
-    return `<button class="rack-space ${space.stock.length?'occupied':'available'}" style="width:100%;min-height:180px;text-align:left" type="button" data-live-location="${esc(space.location_id)}"><div class="rack-space-label"><strong>${esc(space.location_id)}</strong><span>${space.stock.length?`${space.stock.length} stock line${space.stock.length===1?'':'s'}`:'EMPTY'}</span></div>${space.stock.slice(0,8).map(s=>`<div class="rack-stock-line"><b>${esc(s.product_name)}</b><span>${fmt(s.current_base_qty)} ${esc(s.base_unit)} · ${esc(s.supplier_lot_number||s.lot_id)}</span></div>`).join('')}${space.stock.length>8?`<small>+${space.stock.length-8} more</small>`:''}</button>`;
+    const area=liveState.selectedArea,spaces=storageSpaces(area);if(!spaces.length)return `<div class="count-empty-stock"><strong>${esc(area)} not loaded</strong><span>No active location record was returned for this storage area.</span></div>`;
+    const card=space=>`<button class="rack-space ${space.stock.length?'occupied':'available'}" type="button" data-live-location="${esc(space.location_id)}"><div class="rack-space-label"><strong>${esc(space.location_id)}</strong><span>${space.stock.length?`${space.stock.length} stock line${space.stock.length===1?'':'s'}`:'EMPTY'}</span></div>${space.stock.slice(0,3).map(s=>`<div class="rack-stock-line"><b>${esc(s.product_name)}</b><span>${esc(unitDisplay(s))}</span><small>Lot ${esc(s.supplier_lot_number||s.lot_id)}</small></div>`).join('')}${space.stock.length>3?`<small>+${space.stock.length-3} more</small>`:''}</button>`;
+    if(/^R\d{2}$/.test(area))return `<div class="rack-orientation"><span>TOP · LEVEL 3</span><span>FRONT → MIDDLE → BACK</span></div><div class="rack-grid">${spaces.map(card).join('')}</div><div class="rack-orientation bottom"><span>BOTTOM · LEVEL 1</span><span>${esc(area)}-L1-F starts bottom-left</span></div>`;
+    return `<div class="single-storage-card">${card(spaces[0])}</div>`;
   }
 
   function renderLiveInventory(){
-    setHeading('Warehouse','Inventory');
-    const rows=productRows();
-    const areas=[...Array.from({length:50},(_,i)=>`R${String(i+1).padStart(2,'0')}`),'FLOOR-1','FLOOR-2','PACKING'];
-    return `<div class="page-stack">
-      <div class="hero-row"><div class="hero-copy"><span class="worker-kicker">LIVE INVENTORY</span><h2>Current warehouse stock</h2><p>Real product, lot, quantity and location balances from the optimized operational database.</p></div><div>${WRITES_ENABLED?'<span class="status amber">WRITES ENABLED</span>':'<span class="status gray">SAFE READ ONLY</span>'}</div></div>
-      ${statusBanner()}
-      <section class="grid-2">
-        <div class="panel" style="padding:14px"><div class="panel-head"><div><h3>Products</h3><p>All active products, including zero-stock items.</p></div></div><div class="field"><label>Search</label><input data-live-search type="search" value="${esc(liveState.query)}" placeholder="Product name, ID or barcode"></div><div class="count-product-list" style="margin-top:10px">${rows.slice(0,75).map(p=>`<article class="count-product-row"><button type="button" data-live-product="${esc(p.product_id)}"><strong>${esc(p.product_name)}</strong><small>${esc(p.product_id)} · ${esc(p.category||'')}</small></button><div class="count-stock-figure ${number(p.on_hand_base)>0?'count-stock':'count-zero'}"><b>${fmt(p.on_hand_base)} ${esc(p.base_unit)}</b><span>${p.stock.length?`${p.stock.length} stock line${p.stock.length===1?'':'s'}`:'ZERO STOCK'}</span></div></article>`).join('')||'<div class="count-empty-stock"><strong>No matching products</strong><span>Search checks the complete live product list.</span></div>'}</div></div>
-        <div class="panel" style="padding:14px"><div class="panel-head"><div><h3>Storage view</h3><p>R01–R50 plus floor and packing locations.</p></div><select data-live-area>${areas.map(a=>`<option value="${a}" ${a===liveState.selectedArea?'selected':''}>${a}</option>`).join('')}</select></div>${renderStorage()}</div>
-      </section>
-    </div>`;
+    setHeading('Warehouse','Inventory');const rows=productRows(),areas=[...Array.from({length:50},(_,i)=>`R${String(i+1).padStart(2,'0')}`),'FLOOR-1','FLOOR-2','PACKING'];
+    return `<div class="page-stack"><div class="hero-row"><div class="hero-copy"><span class="worker-kicker">LIVE INVENTORY</span><h2>Current warehouse stock</h2><p>Click any storage space to verify, add or remove physical inventory.</p></div><div>${WRITES_ENABLED?'<span class="status amber">CORRECTION MODE AVAILABLE</span>':'<span class="status gray">SAFE READ ONLY</span>'}</div></div>${statusBanner()}<section class="grid-2"><div class="panel" style="padding:14px"><div class="panel-head"><div><h3>Products</h3><p>All active products, including zero-stock items.</p></div></div><div class="field"><label>Search</label><input data-live-search type="search" value="${esc(liveState.query)}" placeholder="Product name, ID or barcode"></div><div class="count-product-list" style="margin-top:10px">${rows.slice(0,75).map(p=>`<article class="count-product-row"><button type="button" data-live-product="${esc(p.product_id)}"><strong>${esc(p.product_name)}</strong><small>${esc(p.product_id)} · ${esc(p.category||'')}</small></button><div class="count-stock-figure ${number(p.on_hand_base)>0?'count-stock':'count-zero'}"><b>${fmt(p.on_hand_base)} ${esc(p.base_unit)}</b><span>${p.stock.length?`${p.stock.length} stock line${p.stock.length===1?'':'s'}`:'ZERO STOCK'}</span></div></article>`).join('')||'<div class="count-empty-stock"><strong>No matching products</strong><span>Search checks the complete live product list.</span></div>'}</div></div><div class="panel" style="padding:14px"><div class="panel-head"><div><h3>Storage view</h3><p>Level 3 is top; Level 1 is bottom. Front, Middle, Back run left to right.</p></div><select data-live-area>${areas.map(a=>`<option value="${a}" ${a===liveState.selectedArea?'selected':''}>${a}</option>`).join('')}</select></div>${renderStorage()}</div></section></div>`;
   }
 
-  function openProduct(productId){
-    const p=(liveState.boot?.products||[]).find(x=>x.product_id===productId);if(!p)return;
-    const stock=balancesForProduct(productId);
-    openDrawer('LIVE PRODUCT',`${p.product_name} · ${p.product_id}`,`<div class="count-product-detail"><div class="count-detail-hero"><span>CURRENT ON HAND</span><strong>${fmt(p.on_hand_base)} ${esc(p.base_unit)}</strong><small>${stock.length} positive balance line${stock.length===1?'':'s'}</small></div>${stock.length?`<div class="count-existing-lines">${stock.map(s=>`<div class="count-existing-line"><div><strong>${esc(s.location_id)}</strong><small>Lot ${esc(s.supplier_lot_number||s.lot_id)} · ${esc(s.lot_unit||'BASE')} × ${fmt(s.lot_conversion_to_base||1)}${s.last_movement_sequence?` · sequence ${fmt(s.last_movement_sequence)}`:''}</small></div><span>${fmt(s.current_base_qty)} ${esc(s.base_unit)}</span></div>`).join('')}</div>`:`<div class="count-empty-stock"><strong>Zero stock</strong><span>This active product currently has no positive inventory balance.</span></div>`}<div class="count-step-note">Read-only validation is active. No inventory changes can be submitted from this screen.</div></div>`);
+  function openProduct(productId){const p=productById(productId);if(!p)return;const stock=balancesForProduct(productId);openDrawer('LIVE PRODUCT',`${p.product_name} · ${p.product_id}`,`<div class="count-product-detail"><div class="count-detail-hero"><span>CURRENT ON HAND</span><strong>${fmt(p.on_hand_base)} ${esc(p.base_unit)}</strong><small>${stock.length} positive balance line${stock.length===1?'':'s'}</small></div>${stock.length?`<div class="count-existing-lines">${stock.map(s=>`<div class="count-existing-line has-action"><div><strong>${esc(s.location_id)}</strong><small>Lot ${esc(s.supplier_lot_number||s.lot_id)} · ${esc(unitDisplay(s))}</small></div><span>${fmt(s.current_base_qty)} ${esc(s.base_unit)}</span>${WRITES_ENABLED?`<button class="inventory-inline-action" type="button" data-live-count="${esc(s.product_id)}|${esc(s.lot_id)}|${esc(s.location_id)}">Count</button>`:''}</div>`).join('')}</div>`:`<div class="count-empty-stock"><strong>Zero stock</strong><span>This active product currently has no positive inventory balance.</span></div>`}</div>`);bindDrawerCorrectionButtons();}
+  function openLocation(locationId){const lines=(liveState.boot?.balances||[]).filter(b=>b.location_id===locationId);openDrawer('LIVE LOCATION',locationId,`<div class="count-product-detail">${lines.length?`<div class="count-existing-lines">${lines.map(s=>`<div class="count-existing-line has-action"><div><strong>${esc(s.product_name)}</strong><small>${esc(s.product_id)} · Lot ${esc(s.supplier_lot_number||s.lot_id)} · ${esc(unitDisplay(s))}</small></div><span>${fmt(s.current_base_qty)} ${esc(s.base_unit)}</span>${WRITES_ENABLED?`<button class="inventory-inline-action" type="button" data-live-count="${esc(s.product_id)}|${esc(s.lot_id)}|${esc(s.location_id)}">Count / correct</button>`:''}</div>`).join('')}</div>`:`<div class="count-empty-stock"><strong>Empty space</strong><span>No positive inventory balance currently exists in this location.</span></div>`}${WRITES_ENABLED?`<div class="inventory-correction-actions"><button class="primary-btn" type="button" data-live-add="${esc(locationId)}">+ Add missing stock here</button><small>Use this only for inventory you physically verified in ${esc(locationId)}.</small></div>`:''}</div>`);bindDrawerCorrectionButtons();}
+  function parseLineKey(key){const [productId,lotId,locationId]=String(key||'').split('|');return {productId,lotId,locationId};}
+  function bindDrawerCorrectionButtons(){document.querySelectorAll('[data-live-count]').forEach(btn=>btn.addEventListener('click',()=>{const k=parseLineKey(btn.dataset.liveCount);openCountEditor(k.productId,k.lotId,k.locationId);}));document.querySelectorAll('[data-live-add]').forEach(btn=>btn.addEventListener('click',()=>openAddEditor(btn.dataset.liveAdd)));}
+
+  function openCountEditor(productId,lotId,locationId){
+    if(!ensureWriteAccess())return;const line=stockLine(productId,lotId,locationId);if(!line){showToast?.('That stock line changed. Refresh inventory.','error');return;}const p=productById(productId)||{},lotUnit=String(line.lot_unit||'').toUpperCase(),base=String(line.base_unit||p.base_unit||'').toUpperCase(),conv=number(line.lot_conversion_to_base||1)||1,useLot=lotUnit&&lotUnit!==base&&conv>0,defaultUnit=useLot?lotUnit:base,currentDisplay=useLot?line.current_base_qty/conv:line.current_base_qty,options=[base,...(useLot?[lotUnit]:[])].filter((v,i,a)=>v&&a.indexOf(v)===i);
+    openDrawer('PHYSICAL COUNT',locationId,`<form class="inventory-correction-form" data-count-form><div class="count-detail-hero"><span>VERIFY THIS STOCK LINE</span><strong>${esc(line.product_name)}</strong><small>${esc(productId)} · Lot ${esc(line.supplier_lot_number||lotId)}</small></div><div class="count-step-note">Enter what is physically in this exact space now. The system will automatically add or remove only the difference.</div><div class="count-form-grid"><div class="field"><label>System quantity</label><input value="${esc(fmt(currentDisplay))} ${esc(defaultUnit)}" disabled></div><div class="field"><label>Actual physical quantity</label><input data-count-actual type="number" min="0" step="any" value="${esc(String(currentDisplay))}" required></div><div class="field"><label>Unit</label><select data-count-unit>${options.map(u=>`<option value="${esc(u)}" ${u===defaultUnit?'selected':''}>${esc(u)}</option>`).join('')}</select></div><div class="field"><label>Base total now</label><input value="${esc(fmt(line.current_base_qty))} ${esc(base)}" disabled></div><div class="field full"><label>Reason / note</label><textarea data-count-notes rows="3" placeholder="Example: physical count, damaged bags, stock not actually here"></textarea></div></div><div class="inventory-form-actions"><button class="secondary-btn inventory-danger-btn" type="button" data-count-zero>Set this stock line to 0</button><button class="primary-btn" type="submit">Save physical count</button></div><div class="inventory-write-status" data-write-status></div></form>`);
+    const form=document.querySelector('[data-count-form]');form?.querySelector('[data-count-zero]')?.addEventListener('click',()=>{form.querySelector('[data-count-actual]').value='0';});
+    form?.addEventListener('submit',async e=>{e.preventDefault();const actual=number(form.querySelector('[data-count-actual]').value),unit=String(form.querySelector('[data-count-unit]').value||base).toUpperCase(),unitConv=unit===base?1:conv,expectedBase=actual*unitConv,status=form.querySelector('[data-write-status]'),submit=form.querySelector('button[type="submit"]');submit.disabled=true;status.textContent='Saving and verifying…';try{await postWrite('physicalCount',{product_id:productId,lot_id:lotId,location_id:locationId,actual_quantity:actual,unit_code:unit,expected_source_sequence:line.last_movement_sequence,notes:form.querySelector('[data-count-notes]').value||''},()=>Math.abs(number(stockLine(productId,lotId,locationId)?.current_base_qty||0)-expectedBase)<0.000001);showToast?.(`Inventory corrected at ${locationId}.`,'success');openLocation(locationId);}catch(err){status.textContent=err.message||String(err);submit.disabled=false;}});
   }
 
-  function openLocation(locationId){
-    const lines=(liveState.boot?.balances||[]).filter(b=>b.location_id===locationId);
-    openDrawer('LIVE LOCATION',locationId,lines.length?`<div class="count-existing-lines">${lines.map(s=>`<div class="count-existing-line"><div><strong>${esc(s.product_name)}</strong><small>${esc(s.product_id)} · Lot ${esc(s.supplier_lot_number||s.lot_id)}</small></div><span>${fmt(s.current_base_qty)} ${esc(s.base_unit)}</span></div>`).join('')}</div>`:`<div class="count-empty-stock"><strong>Empty space</strong><span>No positive inventory balance currently exists in this location.</span></div>`);
+  function activeProductOptions(){return (liveState.boot?.products||[]).slice().sort((a,b)=>String(a.product_name).localeCompare(String(b.product_name)));}
+  function currentLotsForProduct(productId){const map=new Map();(liveState.boot?.balances||[]).filter(b=>b.product_id===productId).forEach(b=>{if(!map.has(b.lot_id))map.set(b.lot_id,b);});return [...map.values()].sort((a,b)=>String(a.supplier_lot_number||a.lot_id).localeCompare(String(b.supplier_lot_number||b.lot_id)));}
+  function openAddEditor(locationId){
+    if(!ensureWriteAccess())return;const products=activeProductOptions();if(!products.length)return;
+    openDrawer('ADD VERIFIED STOCK',locationId,`<form class="inventory-correction-form" data-add-form><div class="count-step-note good">Use this when stock is physically in ${esc(locationId)} but the website is missing it. This creates an audited ADJUST_IN movement.</div><div class="count-form-grid"><div class="field full"><label>Product</label><select data-add-product required><option value="">Select product…</option>${products.map(p=>`<option value="${esc(p.product_id)}">${esc(p.product_name)} · ${esc(p.product_id)}</option>`).join('')}</select></div><div class="field full"><label>Existing lot (recommended when known)</label><select data-add-lot disabled><option value="">Choose a product first</option></select></div><div class="field"><label>Quantity physically found</label><input data-add-qty type="number" min="0.000001" step="any" required></div><div class="field"><label>Unit</label><select data-add-unit disabled required><option value="">Choose product first</option></select></div><div class="field full"><label>Supplier lot number if creating a new lot</label><input data-add-supplier-lot type="text" placeholder="Optional if unknown"></div><div class="field full"><label>Reason / note</label><textarea data-add-notes rows="3" placeholder="Example: found during physical count"></textarea></div></div><div class="inventory-form-actions"><button class="secondary-btn" type="button" data-add-cancel>Cancel</button><button class="primary-btn" type="submit">Add verified stock</button></div><div class="inventory-write-status" data-write-status></div></form>`);
+    const form=document.querySelector('[data-add-form]'),productSelect=form?.querySelector('[data-add-product]'),lotSelect=form?.querySelector('[data-add-lot]'),unitSelect=form?.querySelector('[data-add-unit]');
+    function refreshProduct(){const p=productById(productSelect.value);if(!p){lotSelect.disabled=true;unitSelect.disabled=true;lotSelect.innerHTML='<option value="">Choose a product first</option>';unitSelect.innerHTML='<option value="">Choose product first</option>';return;}const lots=currentLotsForProduct(p.product_id);lotSelect.disabled=false;lotSelect.innerHTML=`<option value="">New / unknown lot</option>${lots.map(l=>`<option value="${esc(l.lot_id)}">Lot ${esc(l.supplier_lot_number||l.lot_id)} · ${esc(l.lot_id)}</option>`).join('')}`;const units=[{unit_code:p.base_unit,conversion_to_base:1},...(p.units||[])],unique=[],seen=new Set();units.forEach(u=>{const code=String(u.unit_code||'').toUpperCase(),conv=number(u.conversion_to_base);if(code&&conv>0&&!seen.has(code)){seen.add(code);unique.push({code,conv});}});unitSelect.disabled=false;unitSelect.innerHTML=unique.map((u,i)=>`<option value="${esc(u.code)}" data-conv="${u.conv}" ${i===0?'selected':''}>${esc(u.code)}${u.conv!==1?` · ${fmt(u.conv)} ${esc(p.base_unit)} each`:''}</option>`).join('');}
+    function refreshLot(){const lot=currentLotsForProduct(productSelect.value).find(l=>l.lot_id===lotSelect.value);if(!lot)return;const opts=[{code:lot.base_unit||productById(productSelect.value)?.base_unit,conv:1},{code:lot.lot_unit,conv:number(lot.lot_conversion_to_base)}].filter(x=>x.code&&x.conv>0),seen=new Set();unitSelect.innerHTML=opts.filter(x=>!seen.has(x.code)&&(seen.add(x.code),true)).map(x=>`<option value="${esc(x.code)}" data-conv="${x.conv}">${esc(x.code)}${x.conv!==1?` · ${fmt(x.conv)} ${esc(lot.base_unit)} each`:''}</option>`).join('');}
+    productSelect?.addEventListener('change',refreshProduct);lotSelect?.addEventListener('change',refreshLot);form?.querySelector('[data-add-cancel]')?.addEventListener('click',()=>openLocation(locationId));
+    form?.addEventListener('submit',async e=>{e.preventDefault();const productId=productSelect.value,p=productById(productId),lotId=lotSelect.value,qty=number(form.querySelector('[data-add-qty]').value),unit=String(unitSelect.value||'').toUpperCase(),selectedOption=unitSelect.options[unitSelect.selectedIndex],conv=number(selectedOption?.dataset?.conv||1);if(!p||qty<=0||!unit||conv<=0)return;const before=lotId?number(stockLine(productId,lotId,locationId)?.current_base_qty||0):productAtLocationBase(productId,locationId),expected=before+qty*conv,status=form.querySelector('[data-write-status]'),submit=form.querySelector('button[type="submit"]');submit.disabled=true;status.textContent='Saving and verifying…';try{await postWrite('foundInventory',{product_id:productId,lot_id:lotId||'',location_id:locationId,quantity:qty,unit_code:unit,conversion_to_base:conv,supplier_lot_number:lotId?'':form.querySelector('[data-add-supplier-lot]').value||'',reason:'PHYSICAL_FOUND',notes:form.querySelector('[data-add-notes]').value||''},()=>lotId?Math.abs(number(stockLine(productId,lotId,locationId)?.current_base_qty||0)-expected)<0.000001:productAtLocationBase(productId,locationId)>=expected-0.000001);showToast?.(`Verified stock added to ${locationId}.`,'success');openLocation(locationId);}catch(err){status.textContent=err.message||String(err);submit.disabled=false;}});
+  }
+
+  async function postWrite(action,payload,verify){
+    if(liveState.writing)throw new Error('Another inventory write is still being verified.');if(!ensureWriteAccess())throw new Error('Inventory corrections are locked.');liveState.writing=true;
+    const operationId=payload.operation_id||`WEB-${Date.now()}-${Math.random().toString(36).slice(2,8)}`,secured={...payload,operation_id:operationId,user_id:WRITE_USER_ID,write_token:getWriteToken()},params=new URLSearchParams();params.set('action',action);params.set('payload',JSON.stringify(secured));let readable=null;
+    try{try{const response=await fetch(API_URL,{method:'POST',body:params,redirect:'follow',credentials:'omit'}),text=await response.text();if(text){try{readable=JSON.parse(text);}catch(_e){}}}catch(_cors){await fetch(API_URL,{method:'POST',body:params,mode:'no-cors',credentials:'omit'});}if(readable&&!readable.ok)throw new Error(readable.error||'Inventory write was rejected.');await sleep(900);await load(true);if(typeof verify==='function'&&!verify()){const s=writeSecurity();if(!s.backendEnabled||!s.tokenConfigured)throw new Error('The Apps Script backend still has inventory writes locked.');throw new Error('The write was not visible after refresh. Verify the private write key and Apps Script execution log before retrying.');}return readable?.result||{operation_id:operationId,verified:true};}finally{liveState.writing=false;}
   }
 
   function bind(){
-    const search=document.querySelector('[data-live-search]');
-    search?.addEventListener('input',e=>{liveState.query=e.target.value;renderPage();requestAnimationFrame(()=>{const n=document.querySelector('[data-live-search]');n?.focus();try{n?.setSelectionRange(n.value.length,n.value.length)}catch(_e){}});});
-    document.querySelector('[data-live-area]')?.addEventListener('change',e=>{liveState.selectedArea=e.target.value;renderPage();});
-    document.querySelectorAll('[data-live-product]').forEach(b=>b.addEventListener('click',()=>openProduct(b.dataset.liveProduct)));
-    document.querySelectorAll('[data-live-location]').forEach(b=>b.addEventListener('click',()=>openLocation(b.dataset.liveLocation)));
-    document.querySelector('[data-live-retry]')?.addEventListener('click',async()=>{liveState.error='';renderPage();await load(true);if(state.page==='inventory')renderPage();});
-    document.querySelector('[data-live-refresh]')?.addEventListener('click',async e=>{const b=e.currentTarget;b.disabled=true;b.textContent='Refreshing…';await load(true);if(state.page==='inventory')renderPage();});
+    const search=document.querySelector('[data-live-search]');search?.addEventListener('input',e=>{liveState.query=e.target.value;renderPage();requestAnimationFrame(()=>{const n=document.querySelector('[data-live-search]');n?.focus();try{n?.setSelectionRange(n.value.length,n.value.length);}catch(_e){}});});
+    document.querySelector('[data-live-area]')?.addEventListener('change',e=>{liveState.selectedArea=e.target.value;renderPage();});document.querySelectorAll('[data-live-product]').forEach(b=>b.addEventListener('click',()=>openProduct(b.dataset.liveProduct)));document.querySelectorAll('[data-live-location]').forEach(b=>b.addEventListener('click',()=>openLocation(b.dataset.liveLocation)));
+    document.querySelector('[data-live-retry]')?.addEventListener('click',async()=>{liveState.error='';renderPage();await load(true);if(state.page==='inventory')renderPage();});document.querySelector('[data-live-refresh]')?.addEventListener('click',async e=>{const b=e.currentTarget;b.disabled=true;b.textContent='Refreshing…';await load(true);if(state.page==='inventory')renderPage();});document.querySelector('[data-live-unlock]')?.addEventListener('click',()=>{if(getWriteToken()){setWriteToken('');renderPage();showToast?.('Inventory corrections locked for this tab.','success');return;}ensureWriteAccess();renderPage();});
   }
 
-  renderInventory=function(){
-    if(!liveState.boot&&!liveState.loading&&!liveState.error){load().then(()=>{if(state.page==='inventory')renderPage();});}
-    return renderLiveInventory();
-  };
-  const baseBind=bindPageInteractions;
-  bindPageInteractions=function(){baseBind();if(state.page==='inventory')bind();};
-
-  window.SanJoseLiveInventory={reload:async()=>{await load(true);if(state.page==='inventory')renderPage();},getState:()=>liveState,api};
-
-  // p2.js renders once before this deferred module runs. If the browser opens or refreshes
-  // directly on #inventory, force a second render so the live adapter actually takes control.
+  renderInventory=function(){if(!liveState.boot&&!liveState.loading&&!liveState.error){load().then(()=>{if(state.page==='inventory')renderPage();});}return renderLiveInventory();};
+  const baseBind=bindPageInteractions;bindPageInteractions=function(){baseBind();if(state.page==='inventory')bind();};
+  window.SanJoseLiveInventory={reload:async()=>{await load(true);if(state.page==='inventory')renderPage();},getState:()=>liveState,api,lockCorrections:()=>{setWriteToken('');if(state.page==='inventory')renderPage();}};
   if(state.page==='inventory')renderPage();
 })();
