@@ -3,7 +3,7 @@ name: Deploy GitHub Pages
 on:
   push:
     branches:
-      - codex/professional-ui-refresh
+      - San_Jose_OP_P2
   workflow_dispatch:
 
 permissions:
@@ -22,10 +22,10 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - name: Checkout branch
+      - name: Checkout P2 branch
         uses: actions/checkout@v4
         with:
-          ref: codex/professional-ui-refresh
+          ref: San_Jose_OP_P2
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
