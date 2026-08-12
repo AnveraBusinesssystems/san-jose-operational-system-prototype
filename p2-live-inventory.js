@@ -27,14 +27,14 @@
     });
   }
 
-  function getWriteToken(){try{return sessionStorage.getItem(WRITE_TOKEN_KEY)||'';}catch(_e){return '';}}
+  function getWriteToken(){const sessionToken=window.SanJoseSystem?.getSessionToken?.();if(sessionToken)return sessionToken;try{return sessionStorage.getItem(WRITE_TOKEN_KEY)||'';}catch(_e){return '';}}
   function setWriteToken(value){try{if(value)sessionStorage.setItem(WRITE_TOKEN_KEY,value);else sessionStorage.removeItem(WRITE_TOKEN_KEY);}catch(_e){}}
-  function writeSecurity(){const s=liveState.apiInfo?.write_security||{};return {backendEnabled:s.writes_enabled===true,tokenConfigured:s.write_token_configured===true,unlocked:Boolean(getWriteToken())};}
+  function writeSecurity(){const s=liveState.apiInfo?.write_security||{};return {backendEnabled:s.writes_enabled===true,tokenConfigured:s.session_authentication===true||s.legacy_write_token_configured===true,unlocked:Boolean(getWriteToken())};}
   function ensureWriteAccess(){
     if(!WRITES_ENABLED){showToast?.('Inventory correction UI is disabled in the website configuration.','error');return false;}
     const s=writeSecurity();
-    if(!s.backendEnabled||!s.tokenConfigured){openDrawer('INVENTORY CORRECTIONS','Backend setup required',`<div class="count-step-note">The website is ready, but the Apps Script deployment still needs both Script Properties: <strong>INVENTORY_WRITES_ENABLED = TRUE</strong> and <strong>INVENTORY_WRITE_TOKEN = your private key</strong>. The key must stay out of GitHub.</div>`);return false;}
-    if(!s.unlocked){const token=window.prompt('Enter the private inventory write key for this browser tab. It is stored only in sessionStorage and is not saved in GitHub.');if(!token)return false;setWriteToken(token.trim());}
+    if(!s.backendEnabled||!s.tokenConfigured){openDrawer('INVENTORY CORRECTIONS','Backend setup required',`<div class="count-step-note">The website is connected, but the Apps Script safety switch is still off. Run <strong>enableOperationalWrites()</strong> in Apps Script after validation, then sign in with an authorized user.</div>`);return false;}
+    if(!s.unlocked){if(window.SanJoseSystem?.openLogin){window.SanJoseSystem.openLogin();return false;}const token=window.prompt('Enter the private inventory write key for this browser tab.');if(!token)return false;setWriteToken(token.trim());}
     return Boolean(getWriteToken());
   }
 
@@ -116,7 +116,7 @@
 
   async function postWrite(action,payload,verify){
     if(liveState.writing)throw new Error('Another inventory write is still being verified.');if(!ensureWriteAccess())throw new Error('Inventory corrections are locked.');liveState.writing=true;
-    const operationId=payload.operation_id||`WEB-${Date.now()}-${Math.random().toString(36).slice(2,8)}`,secured={...payload,operation_id:operationId,user_id:WRITE_USER_ID,write_token:getWriteToken()},params=new URLSearchParams();params.set('action',action);params.set('payload',JSON.stringify(secured));let readable=null;
+    const operationId=payload.operation_id||`WEB-${Date.now()}-${Math.random().toString(36).slice(2,8)}`,credential=getWriteToken(),secured={...payload,operation_id:operationId,user_id:WRITE_USER_ID,session_token:window.SanJoseSystem?.getSessionToken?.()||'',write_token:window.SanJoseSystem?.getSessionToken?.()?'':credential},params=new URLSearchParams();params.set('action',action);params.set('payload',JSON.stringify(secured));let readable=null;
     try{try{const response=await fetch(API_URL,{method:'POST',body:params,redirect:'follow',credentials:'omit'}),text=await response.text();if(text){try{readable=JSON.parse(text);}catch(_e){}}}catch(_cors){await fetch(API_URL,{method:'POST',body:params,mode:'no-cors',credentials:'omit'});}if(readable&&!readable.ok)throw new Error(readable.error||'Inventory write was rejected.');await sleep(900);await load(true);if(typeof verify==='function'&&!verify()){const s=writeSecurity();if(!s.backendEnabled||!s.tokenConfigured)throw new Error('The Apps Script backend still has inventory writes locked.');throw new Error('The write was not visible after refresh. Verify the private write key and Apps Script execution log before retrying.');}return readable?.result||{operation_id:operationId,verified:true};}finally{liveState.writing=false;}
   }
 
