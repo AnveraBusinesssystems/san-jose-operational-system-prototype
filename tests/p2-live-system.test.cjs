@@ -7,9 +7,12 @@ const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const system = fs.readFileSync(path.join(root, 'p2-system.js'), 'utf8');
 const inventory = fs.readFileSync(path.join(root, 'p2-live-inventory.js'), 'utf8');
 
-assert.match(html, /p2-system\.css\?v=1/);
-assert.match(html, /p2-system\.js\?v=1/);
+assert.match(html, /p2-system\.css\?v=2/);
+assert.match(html, /p2-system\.js\?v=2/);
 assert.match(html, /p2-live-inventory\.js\?v=8/);
+assert.match(html, /id="p2LoginScreen"/);
+assert.match(html, /id="p2LoginForm"/);
+assert.match(html, /Use your account from the USERS tab/);
 
 for (const action of [
   'apiInfo', 'login', 'sessionInfo', 'getDashboard', 'listOrders', 'getOrder',
@@ -27,6 +30,7 @@ for (const page of [
 ]) assert.ok(system.includes(page), `missing page connector ${page}`);
 
 assert.match(system, /session_token/);
+assert.match(system, /setAuthScreen/);
 assert.match(inventory, /SanJoseSystem\?\.getSessionToken/);
 assert.match(inventory, /openMoveEditor/);
 assert.match(inventory, /'moveInventory'/);

@@ -14,17 +14,39 @@
   <link rel="stylesheet" href="./p2-live-inventory-writes.css?v=1">
   <link rel="stylesheet" href="./p2-mobile.css?v=1">
   <link rel="stylesheet" href="./p2-overview.css?v=1">
-  <link rel="stylesheet" href="./p2-system.css?v=1">
+  <link rel="stylesheet" href="./p2-system.css?v=2">
   <script defer src="./p2-config.js?v=8"></script>
   <script defer src="./p2.js?v=3"></script>
   <script defer src="./p2-sort.js?v=3"></script>
   <script defer src="./p2-live-inventory.js?v=8"></script>
   <script defer src="./p2-mobile.js?v=1"></script>
   <script defer src="./p2-overview.js?v=1"></script>
-  <script defer src="./p2-system.js?v=1"></script>
+  <script defer src="./p2-system.js?v=2"></script>
 </head>
 <body>
-  <div class="app-shell">
+  <section id="p2LoginScreen" class="p2-login-screen" aria-label="San Jose Operations sign in">
+    <div class="p2-login-overlay"></div>
+    <div class="p2-login-content">
+      <div class="p2-login-heading">
+        <img src="./logo_San_Jose.png" alt="San Jose Produce & Imports">
+        <p class="p2-login-eyebrow">SAN JOSE OPERATIONS</p>
+        <h1>Operations<br>Center</h1>
+        <p>Inventory, orders, receiving, shipping, and warehouse movement in one workspace.</p>
+      </div>
+      <form id="p2LoginForm" class="p2-login-card">
+        <span class="p2-login-eyebrow">TEAM ACCESS</span>
+        <h2>Sign in</h2>
+        <p>Use your account from the USERS tab.</p>
+        <label><span>User ID</span><input name="user_id" autocomplete="username" required autofocus></label>
+        <label><span>Password</span><input name="password" type="password" autocomplete="current-password" required></label>
+        <div id="p2LoginError" class="p2-login-error" role="alert" aria-live="polite"></div>
+        <button class="primary-btn" type="submit">Open workspace</button>
+      </form>
+    </div>
+    <p class="p2-login-footer">San Jose Produce & Imports · Operational System</p>
+  </section>
+
+  <div id="p2App" class="app-shell" hidden>
     <aside class="sidebar">
       <div class="brand-block">
         <img src="./logo_San_Jose.png" alt="San Jose Produce & Imports">
