@@ -47,5 +47,82 @@ function sjGetDashboard() {
   var metrics = sjGetWebsiteMetrics();
   var byKey = {};
   metrics.forEach(function (metric) { byKey[metric.metric_key] = metric; });
-  return {generated_at: sjNow_(), metrics: metrics, by_key: byKey, inventory: sjInventoryMetrics()};
+  return {generated_at: sjNow_(), metrics: metrics, by_key: byKey, inventory: sjInventoryMetrics(), owner_analytics: sjGetOwnerAnalytics_(metrics, byKey)};
+}
+
+/** Owner-facing read model. Reads formula tabs only; never modifies source data. */
+function sjMetricProductRows_(sheetName) {
+  var sheet = sjSheet_(sheetName);
+  var lastRow = Math.max(3, sheet.getLastRow());
+  var values = sheet.getRange(3, 17, lastRow - 2, 10).getValues(); // Q:Z
+  return values.filter(function (row) { return sjString_(row[0]); }).map(function (row) {
+    return {
+      product_id: sjString_(row[0]), base_qty_sold: sjNumber_(row[1]), sales: sjNumber_(row[2]),
+      gross_profit: row[3] === '' || row[3] === null ? null : sjNumber_(row[3]), product_name: sjString_(row[4]),
+      margin_pct: row[5] === '' || row[5] === null ? null : sjNumber_(row[5]),
+      sale_per_lb: row[6] === '' || row[6] === null ? null : sjNumber_(row[6]),
+      cost_per_lb: row[7] === '' || row[7] === null ? null : sjNumber_(row[7]),
+      recent_sale_per_lb: row[8] === '' || row[8] === null ? null : sjNumber_(row[8]),
+      recent_cost_per_lb: row[9] === '' || row[9] === null ? null : sjNumber_(row[9])
+    };
+  });
+}
+
+function sjOperationalProductRows_() {
+  var sheet = sjSheet_('OPERATIONS_METRICS');
+  var lastRow = Math.max(5, Math.min(sheet.getLastRow(), 300));
+  var values = sheet.getRange(5, 1, lastRow - 4, 18).getValues(); // A:R
+  return values.filter(function (row) { return sjString_(row[0]); }).map(function (row) {
+    return {
+      product_id: sjString_(row[0]), product_name: sjString_(row[1]), category: sjString_(row[2]),
+      on_hand_lb: sjNumber_(row[3]), committed_lb: sjNumber_(row[4]), free_lb: sjNumber_(row[5]), incoming_lb: sjNumber_(row[6]),
+      avg_weekly_demand_lb: sjNumber_(row[7]), weeks_cover: row[8] === '' || row[8] === null ? null : sjNumber_(row[8]),
+      reorder_point_lb: sjNumber_(row[9]), suggested_buy_lb: sjNumber_(row[10]),
+      current_cost_per_lb: row[11] === '' || row[11] === null ? null : sjNumber_(row[11]),
+      current_sell_per_lb: row[12] === '' || row[12] === null ? null : sjNumber_(row[12]),
+      margin_pct: row[13] === '' || row[13] === null ? null : sjNumber_(row[13]),
+      inventory_value: row[14] === '' || row[14] === null ? null : sjNumber_(row[14]), expiring_qty_lb: sjNumber_(row[15]),
+      at_risk_value: row[16] === '' || row[16] === null ? null : sjNumber_(row[16]), status: sjUpper_(row[17]) || 'OK'
+    };
+  });
+}
+
+function sjAnalyticsTotals_(rows) {
+  var totals = {products: rows.length, base_qty_sold: 0, sales: 0, sales_with_cost: 0, gross_profit: 0, products_with_cost: 0, products_missing_cost: 0};
+  rows.forEach(function (row) {
+    totals.base_qty_sold += row.base_qty_sold; totals.sales += row.sales;
+    if (row.gross_profit === null) totals.products_missing_cost++;
+    else { totals.gross_profit += row.gross_profit; totals.sales_with_cost += row.sales; totals.products_with_cost++; }
+  });
+  totals.margin_pct = totals.sales_with_cost ? totals.gross_profit / totals.sales_with_cost : null;
+  return totals;
+}
+
+function sjGetOwnerAnalytics_(metrics, byKey) {
+  var wholesale = sjMetricProductRows_('SALES_METRICS');
+  var shopify = sjMetricProductRows_('SHOPIFY_METRICS');
+  var operations = sjOperationalProductRows_();
+  return {
+    generated_at: sjNow_(),
+    methodology: {
+      wholesale: 'Completed positive-pound sales excluding Shopify customer ' + SJ_CONFIG.SHOPIFY_PARTY_ID + '.',
+      shopify: 'Completed positive-pound sales for Shopify customer ' + SJ_CONFIG.SHOPIFY_PARTY_ID + '.',
+      margin: 'Gross profit divided only by sales with reliable product cost.',
+      ranking_period: 'All valid transactions currently represented by the formula-backed metric tabs.'
+    },
+    website_metrics: {rows: metrics, by_key: byKey},
+    channels: {wholesale: {totals: sjAnalyticsTotals_(wholesale), products: wholesale}, shopify: {totals: sjAnalyticsTotals_(shopify), products: shopify}},
+    operations: {
+      products: operations,
+      summary: {
+        products: operations.length,
+        reorder: operations.filter(function (row) { return row.status === 'REORDER'; }).length,
+        out_of_stock: operations.filter(function (row) { return row.status === 'OUT OF STOCK'; }).length,
+        no_recent_demand: operations.filter(function (row) { return row.status === 'NO RECENT DEMAND'; }).length,
+        expiring: operations.filter(function (row) { return row.status === 'EXPIRING'; }).length,
+        suggested_buy_lb: operations.reduce(function (sum, row) { return sum + row.suggested_buy_lb; }, 0),
+        at_risk_value: operations.reduce(function (sum, row) { return sum + (row.at_risk_value || 0); }, 0)
+      }
+    }
+  };
 }

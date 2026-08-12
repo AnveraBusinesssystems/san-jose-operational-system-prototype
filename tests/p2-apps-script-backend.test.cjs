@@ -74,6 +74,16 @@ test('Shopify demand is included and formulas are documented by the API', () => 
   assert.match(metrics, /MAX\(reorder_point − inventory_position, 0\)/);
 });
 
+test('owner analytics stays in the read-only metrics module', () => {
+  const metrics = read('50_Metrics.gs');
+  assert.match(metrics, /owner_analytics: sjGetOwnerAnalytics_/);
+  assert.match(metrics, /SALES_METRICS/);
+  assert.match(metrics, /SHOPIFY_METRICS/);
+  assert.match(metrics, /OPERATIONS_METRICS/);
+  assert.match(metrics, /sales_with_cost/);
+  assert.doesNotMatch(metrics, /setValue|setValues|appendRow|clearContent/);
+});
+
 test('no credential hash is returned by public record serializers', () => {
   assert.match(read('01_Utilities.gs'), /key === 'credential_hash'/);
 });
