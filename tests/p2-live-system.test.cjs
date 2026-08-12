@@ -9,7 +9,7 @@ const inventory = fs.readFileSync(path.join(root, 'p2-live-inventory.js'), 'utf8
 
 assert.match(html, /p2-system\.css\?v=1/);
 assert.match(html, /p2-system\.js\?v=1/);
-assert.match(html, /p2-live-inventory\.js\?v=7/);
+assert.match(html, /p2-live-inventory\.js\?v=8/);
 
 for (const action of [
   'apiInfo', 'login', 'sessionInfo', 'getDashboard', 'listOrders', 'getOrder',
@@ -28,5 +28,7 @@ for (const page of [
 
 assert.match(system, /session_token/);
 assert.match(inventory, /SanJoseSystem\?\.getSessionToken/);
+assert.match(inventory, /openMoveEditor/);
+assert.match(inventory, /'moveInventory'/);
 assert.doesNotMatch(system, /INVENTORY_WRITE_TOKEN/);
 console.log('P2 live system integration checks passed.');
