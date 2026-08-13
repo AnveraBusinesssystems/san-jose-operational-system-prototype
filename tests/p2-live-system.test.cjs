@@ -8,7 +8,7 @@ const system = fs.readFileSync(path.join(root, 'p2-system.js'), 'utf8');
 const inventory = fs.readFileSync(path.join(root, 'p2-live-inventory.js'), 'utf8');
 
 assert.match(html, /p2-system\.css\?v=4/);
-assert.match(html, /p2-system\.js\?v=5/);
+assert.match(html, /p2-system\.js\?v=6/);
 assert.match(html, /p2\.js\?v=4/);
 assert.match(html, /p2-live-inventory\.js\?v=8/);
 assert.match(html, /p2-owner-analytics\.css\?v=1/);
@@ -48,4 +48,6 @@ assert.match(system, /data-order-filter-form/);
 assert.match(system, /total Sheet orders/);
 assert.match(system, />View<\/button>/);
 assert.match(system, /scan\.elements\.namedItem\('query'\)/);
+assert.match(html, /pattern="\[0-9\]\{4\}"/);
+assert.match(system, /Enter your 4-digit PIN/);
 console.log('P2 live system integration checks passed.');
