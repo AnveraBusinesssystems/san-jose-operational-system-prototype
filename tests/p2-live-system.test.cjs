@@ -7,8 +7,8 @@ const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const system = fs.readFileSync(path.join(root, 'p2-system.js'), 'utf8');
 const inventory = fs.readFileSync(path.join(root, 'p2-live-inventory.js'), 'utf8');
 
-assert.match(html, /p2-system\.css\?v=4/);
-assert.match(html, /p2-system\.js\?v=7/);
+assert.match(html, /p2-system\.css\?v=5/);
+assert.match(html, /p2-system\.js\?v=8/);
 assert.match(html, /p2\.js\?v=4/);
 assert.match(html, /p2-live-inventory\.js\?v=10/);
 assert.match(html, /p2-owner-analytics\.css\?v=1/);
@@ -17,6 +17,10 @@ assert.match(html, /id="p2LoginScreen"/);
 assert.match(html, /id="p2LoginForm"/);
 assert.match(html, /Enter your team PIN/);
 assert.doesNotMatch(html, /name="user_id"/);
+assert.match(system, /Print bill/);
+assert.match(system, /QR lot labels/);
+assert.match(system, /PURCHASE_LOT/);
+assert.match(system, /purchaseReference/);
 
 for (const action of [
   'apiInfo', 'login', 'sessionInfo', 'getDashboard', 'listOrders', 'getOrder',
