@@ -22,7 +22,7 @@
   <script defer src="./p2-live-inventory.js?v=8"></script>
   <script defer src="./p2-mobile.js?v=1"></script>
   <script defer src="./p2-overview.js?v=1"></script>
-  <script defer src="./p2-system.js?v=6"></script>
+  <script defer src="./p2-system.js?v=7"></script>
 </head>
 <body>
   <section id="p2LoginScreen" class="p2-login-screen" aria-label="San Jose Operations sign in">
@@ -37,9 +37,8 @@
       <form id="p2LoginForm" class="p2-login-card">
         <span class="p2-login-eyebrow">TEAM ACCESS</span>
         <h2>Sign in</h2>
-        <p>Use your account from the USERS tab.</p>
-        <label><span>User ID</span><input name="user_id" autocomplete="username" required autofocus></label>
-        <label><span>4-digit PIN</span><input name="password" type="password" inputmode="numeric" pattern="[0-9]{4}" minlength="4" maxlength="4" autocomplete="current-password" required></label>
+        <p>Enter your team PIN.</p>
+        <label><span>4-digit PIN</span><input name="password" type="password" inputmode="numeric" pattern="[0-9]{4}" minlength="4" maxlength="4" autocomplete="current-password" required autofocus></label>
         <div id="p2LoginError" class="p2-login-error" role="alert" aria-live="polite"></div>
         <button class="primary-btn" type="submit">Open workspace</button>
       </form>

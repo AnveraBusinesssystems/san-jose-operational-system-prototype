@@ -10,7 +10,7 @@
   const app={session:null,apiInfo:null,cache:{},loading:new Set(),errors:{},queries:{},scanner:null,orders:{PURCHASE:freshOrderState(),SALE:freshOrderState()},analytics:{tab:'executive',rank:'sales',channel:'all'}};
 
   function savedSession(){try{return JSON.parse(sessionStorage.getItem(SESSION_KEY)||'null')}catch(_e){return null}}
-  function setAuthScreen(signedIn){const login=document.getElementById('p2LoginScreen'),workspace=document.getElementById('p2App');if(login)login.hidden=signedIn;if(workspace)workspace.hidden=!signedIn;document.body.classList.toggle('p2-login-mode',!signedIn);if(!signedIn)setTimeout(()=>document.querySelector('#p2LoginForm [name="user_id"]')?.focus(),0)}
+  function setAuthScreen(signedIn){const login=document.getElementById('p2LoginScreen'),workspace=document.getElementById('p2App');if(login)login.hidden=signedIn;if(workspace)workspace.hidden=!signedIn;document.body.classList.toggle('p2-login-mode',!signedIn);if(!signedIn)setTimeout(()=>document.querySelector('#p2LoginForm [name="password"]')?.focus(),0)}
   function saveSession(value){app.session=value;try{value?sessionStorage.setItem(SESSION_KEY,JSON.stringify(value)):sessionStorage.removeItem(SESSION_KEY)}catch(_e){}updateSessionUi();setAuthScreen(Boolean(value))}
   function token(){return app.session?.session_token||''}
   function operationId(prefix='WEB'){return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2,9)}`}
@@ -68,7 +68,8 @@
     button.disabled=true;button.textContent='Signing in…';status.textContent='Connecting to Google Sheets…';
     const slowNotice=setTimeout(()=>{status.textContent='Still connecting — the first login can take a few seconds.'},5000);
     try{
-      const result=await write('login',{user_id:form.user_id.value,password:form.password.value,session_token:''});button.textContent='Opening workspace…';status.textContent='';saveSession(result);form.reset();button.disabled=false;button.textContent=defaultText;if(!document.getElementById('detailDrawer')?.hidden)closeDrawer();toast(`Signed in as ${result.user?.full_name||result.user?.user_id}.`);renderPage();
+      const loginPayload={password:form.password.value,session_token:''};if(app.apiInfo?.pin_only_login!==true)loginPayload.user_id='ANGEL';
+      const result=await write('login',loginPayload);button.textContent='Opening workspace…';status.textContent='';saveSession(result);form.reset();button.disabled=false;button.textContent=defaultText;if(!document.getElementById('detailDrawer')?.hidden)closeDrawer();toast(`Signed in as ${result.user?.full_name||result.user?.user_id}.`);renderPage();
     }catch(error){status.textContent=error.message;button.disabled=false;button.textContent=defaultText}
     finally{clearTimeout(slowNotice)}
   }
