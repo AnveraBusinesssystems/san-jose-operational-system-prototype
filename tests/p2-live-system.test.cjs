@@ -10,7 +10,7 @@ const inventory = fs.readFileSync(path.join(root, 'p2-live-inventory.js'), 'utf8
 assert.match(html, /p2-system\.css\?v=4/);
 assert.match(html, /p2-system\.js\?v=7/);
 assert.match(html, /p2\.js\?v=4/);
-assert.match(html, /p2-live-inventory\.js\?v=8/);
+assert.match(html, /p2-live-inventory\.js\?v=9/);
 assert.match(html, /p2-owner-analytics\.css\?v=1/);
 assert.doesNotMatch(html, /p2-owner-analytics\.js/);
 assert.match(html, /id="p2LoginScreen"/);
@@ -38,6 +38,7 @@ assert.match(system, /setAuthScreen/);
 assert.match(inventory, /SanJoseSystem\?\.getSessionToken/);
 assert.match(inventory, /openMoveEditor/);
 assert.match(inventory, /'moveInventory'/);
+assert.doesNotMatch(inventory, /showToast/);
 assert.doesNotMatch(system, /INVENTORY_WRITE_TOKEN/);
 assert.match(system, /owner_analytics/);
 assert.match(system, /Products Losing Money/);
