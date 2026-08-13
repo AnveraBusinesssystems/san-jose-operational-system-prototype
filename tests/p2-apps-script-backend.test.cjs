@@ -54,6 +54,8 @@ test('writes use signed sessions, permissions, write switch, and locking', () =>
   assert.match(auth, /SESSION_TTL_SECONDS/);
   assert.match(auth, /OPERATIONS_WRITES_ENABLED/);
   assert.match(auth, /sjRequirePermission_/);
+  assert.match(auth, /\^\\d\{4\}\$/);
+  assert.match(auth, /PIN must contain exactly 4 numbers/);
   assert.match(read('01_Utilities.gs'), /getScriptLock/);
 });
 
