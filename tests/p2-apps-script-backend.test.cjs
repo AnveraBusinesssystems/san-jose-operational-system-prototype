@@ -84,6 +84,11 @@ test('owner analytics stays in the read-only metrics module', () => {
   assert.match(metrics, /SALES_METRICS/);
   assert.match(metrics, /SHOPIFY_METRICS/);
   assert.match(metrics, /OPERATIONS_METRICS/);
+  assert.match(metrics, /PRICE_LIST/);
+  assert.match(metrics, /price_list: sjPriceListAnalytics_/);
+  assert.match(metrics, /historical_cost_per_lb/);
+  assert.match(metrics, /recency_cost_per_lb/);
+  assert.match(metrics, /latest_cost_per_lb/);
   assert.match(metrics, /sales_with_cost/);
   assert.doesNotMatch(metrics, /setValue|setValues|appendRow|clearContent/);
 });
