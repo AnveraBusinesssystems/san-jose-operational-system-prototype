@@ -6,12 +6,15 @@ const root = path.resolve(__dirname, '..');
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const system = fs.readFileSync(path.join(root, 'p2-system.js'), 'utf8');
 const inventory = fs.readFileSync(path.join(root, 'p2-live-inventory.js'), 'utf8');
+const config = fs.readFileSync(path.join(root, 'p2-config.js'), 'utf8');
 
 assert.match(html, /p2-system\.css\?v=5/);
 assert.match(html, /p2-system\.js\?v=9/);
 assert.match(html, /p2\.js\?v=4/);
 assert.match(html, /p2-live-inventory\.js\?v=10/);
 assert.match(html, /p2-owner-analytics\.css\?v=2/);
+assert.match(html, /p2-config\.js\?v=11/);
+assert.match(config, /AKfycbwV-78yi9qOG-59HsDXye0Fy-6i47DNem2qQu5gBjygb7t6CGnKoqYATI6NrkXijqE0jw/);
 assert.doesNotMatch(html, /p2-owner-analytics\.js/);
 assert.match(html, /id="p2LoginScreen"/);
 assert.match(html, /id="p2LoginForm"/);
