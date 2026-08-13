@@ -8,7 +8,7 @@ const system = fs.readFileSync(path.join(root, 'p2-system.js'), 'utf8');
 const inventory = fs.readFileSync(path.join(root, 'p2-live-inventory.js'), 'utf8');
 
 assert.match(html, /p2-system\.css\?v=4/);
-assert.match(html, /p2-system\.js\?v=4/);
+assert.match(html, /p2-system\.js\?v=5/);
 assert.match(html, /p2\.js\?v=4/);
 assert.match(html, /p2-live-inventory\.js\?v=8/);
 assert.match(html, /p2-owner-analytics\.css\?v=1/);

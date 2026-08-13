@@ -28,9 +28,13 @@
   async function write(action,payload={}){
     if(!API)throw new Error('Apps Script URL is not configured.');
     const body=new URLSearchParams();body.set('action',action);body.set('payload',JSON.stringify({...payload,session_token:payload.session_token||token()}));
-    const response=await fetch(API,{method:'POST',body,redirect:'follow',credentials:'omit'}),text=await response.text();
-    let data;try{data=JSON.parse(text)}catch(_e){throw new Error('Apps Script returned an unreadable write response.')}
-    if(!data?.ok)throw new Error(data?.error||`${action} failed.`);return data.result;
+    const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),30000);
+    try{
+      const response=await fetch(API,{method:'POST',body,redirect:'follow',credentials:'omit',signal:controller.signal}),text=await response.text();
+      let data;try{data=JSON.parse(text)}catch(_e){throw new Error('Apps Script returned an unreadable write response.')}
+      if(!data?.ok)throw new Error(data?.error||`${action} failed.`);return data.result;
+    }catch(error){if(error?.name==='AbortError')throw new Error('Google Sheets did not respond within 30 seconds. Please try again.');throw error}
+    finally{clearTimeout(timer)}
   }
   function rows(value){return Array.isArray(value)?value:(Array.isArray(value?.rows)?value.rows:[])}
   function connected(label='LIVE'){return `<span class="status green"><span class="live-state-dot"></span>${esc(label)}</span>`}
@@ -42,13 +46,11 @@
     if(app.cache[key]!==undefined||app.loading.has(key))return;
     app.loading.add(key);delete app.errors[key];
     try{
-      const limit=500,all=[];let offset=0,total=0,guard=0;
-      do{
-        const result=await read('listOrders',{order_type:type,limit,offset});
-        const batch=rows(result);if(!offset)total=Math.max(num(result?.total),batch.length);
-        all.push(...batch);offset+=batch.length;guard++;
-        if(!batch.length||(!truth(result?.has_more)&&offset>=total))break;
-      }while(guard<20);
+      const limit=500,first=await read('listOrders',{order_type:type,limit,offset:0}),all=rows(first),total=Math.max(num(first?.total),all.length),pageSize=Math.max(1,num(first?.limit)||all.length||limit);
+      if(truth(first?.has_more)&&all.length<total){
+        const requests=[];for(let offset=pageSize;offset<total;offset+=pageSize)requests.push(read('listOrders',{order_type:type,limit:pageSize,offset}));
+        const remaining=await Promise.all(requests);remaining.forEach(result=>all.push(...rows(result)));
+      }
       app.cache[key]={rows:all,total:Math.max(total,all.length),limit:all.length,offset:0,has_more:all.length<total};
     }catch(error){app.errors[key]=error.message}
     finally{app.loading.delete(key);if(document.getElementById('pageView'))renderPage()}
@@ -59,8 +61,16 @@
     host.innerHTML=`<div class="avatar">${esc((user?.full_name||user?.user_id||'A').charAt(0).toUpperCase())}</div><button class="live-session" type="button" data-live-session><strong>${esc(user?.full_name||'Sign in')}</strong><span>${esc(user?`${user.role} · session active`:'Enable authorized edits')}</span></button>`;
     host.querySelector('[data-live-session]').onclick=()=>user?openSession():openLogin();
   }
-  function openLogin(){saveSession(null)}
-  async function submitLogin(event){event.preventDefault();const form=event.currentTarget,status=form.querySelector('[data-form-status]')||document.getElementById('p2LoginError'),button=form.querySelector('button[type=submit]'),defaultText=button.textContent;button.disabled=true;button.textContent='Checking account…';status.textContent='';try{const result=await write('login',{user_id:form.user_id.value,password:form.password.value,session_token:''});button.disabled=false;button.textContent=defaultText;saveSession(result);form.reset();if(!document.getElementById('detailDrawer')?.hidden)closeDrawer();toast(`Signed in as ${result.user?.full_name||result.user?.user_id}.`);renderPage()}catch(error){status.textContent=error.message;button.disabled=false;button.textContent=defaultText}}
+  function openLogin(){const form=document.getElementById('p2LoginForm'),button=form?.querySelector('button[type=submit]'),status=form?.querySelector('[data-form-status]')||document.getElementById('p2LoginError');if(button){button.disabled=false;button.textContent='Open workspace'}if(status)status.textContent='';saveSession(null)}
+  async function submitLogin(event){
+    event.preventDefault();const form=event.currentTarget,status=form.querySelector('[data-form-status]')||document.getElementById('p2LoginError'),button=form.querySelector('button[type=submit]'),defaultText=button.textContent;
+    button.disabled=true;button.textContent='Signing in…';status.textContent='Connecting to Google Sheets…';
+    const slowNotice=setTimeout(()=>{status.textContent='Still connecting — the first login can take a few seconds.'},5000);
+    try{
+      const result=await write('login',{user_id:form.user_id.value,password:form.password.value,session_token:''});button.textContent='Opening workspace…';status.textContent='';saveSession(result);form.reset();button.disabled=false;button.textContent=defaultText;if(!document.getElementById('detailDrawer')?.hidden)closeDrawer();toast(`Signed in as ${result.user?.full_name||result.user?.user_id}.`);renderPage();
+    }catch(error){status.textContent=error.message;button.disabled=false;button.textContent=defaultText}
+    finally{clearTimeout(slowNotice)}
+  }
   function openSession(){const user=app.session.user||{};openDrawer('ACCOUNT',user.full_name||user.user_id,`<div class="live-kv"><div><span>User ID</span><strong>${esc(user.user_id)}</strong></div><div><span>Role</span><strong>${esc(user.role)}</strong></div><div><span>Session</span><strong>Active</strong></div><div><span>Writes</span><strong>${app.apiInfo?.writes_enabled?'Enabled':'Backend locked'}</strong></div></div><div class="drawer-actions"><button class="secondary-btn" data-sign-out>Sign out</button></div>`);document.querySelector('[data-sign-out]').onclick=()=>{closeDrawer();saveSession(null)}}
   async function restoreSession(){app.session=savedSession();setAuthScreen(false);try{app.apiInfo=await read('apiInfo');if(app.session){const info=await write('sessionInfo',{});app.session.user=info.user;saveSession(app.session)}}catch(error){if(app.session){saveSession(null)}}finally{updateSessionUi();setAuthScreen(Boolean(app.session));renderPage()}}
 
