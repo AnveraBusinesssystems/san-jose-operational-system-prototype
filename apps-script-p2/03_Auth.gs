@@ -121,10 +121,13 @@ function sjLogin(payload) {
   payload = payload || {};
   var userId = sjUpper_(payload.user_id || payload.username);
   var users = sjTable_('USERS');
-  var user = users.records.find(function (record) {
-    return sjUpper_(record.user_id) === userId && sjBoolean_(record.is_active);
+  var matches = users.records.filter(function (record) {
+    if (!sjBoolean_(record.is_active)) return false;
+    if (userId && sjUpper_(record.user_id) !== userId) return false;
+    return sjVerifyCredential_(payload.password, record.credential_hash);
   });
-  if (!user || !sjVerifyCredential_(payload.password, user.credential_hash)) throw new Error('Invalid user or password.');
+  if (matches.length !== 1) throw new Error(matches.length > 1 ? 'This PIN is assigned to more than one user. Contact an administrator.' : 'Invalid PIN.');
+  var user = matches[0];
   var now = sjNow_();
   sjUpdate_(users, user._sheet_row, {last_login_at: now, updated_at: now});
   return {session_token: sjIssueSession_(user), expires_in_seconds: SJ_CONFIG.SESSION_TTL_SECONDS, user: sjPublicRecord_(user)};
@@ -139,12 +142,14 @@ function sjCreateUser(payload) {
   var users = sjTable_('USERS');
   var userId = sjUpper_(sjRequired_(payload.user_id, 'user_id'));
   if (sjFind_(users, userId)) throw new Error('User already exists: ' + userId + '.');
+  var pin = sjRequired_(payload.password, 'password');
+  if (users.records.some(function (record) { return sjVerifyCredential_(pin, record.credential_hash); })) throw new Error('PIN is already assigned to another user.');
   var now = sjNow_();
   var record = {
     user_id: userId,
     full_name: sjRequired_(payload.full_name, 'full_name'),
     role: sjRole_(payload.role),
-    credential_hash: sjCreateCredentialHash_(payload.password),
+    credential_hash: sjCreateCredentialHash_(pin),
     is_active: true,
     last_login_at: '',
     created_at: now,

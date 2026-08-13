@@ -91,7 +91,7 @@ Never delete or edit a saved inventory movement. Correct inventory by posting an
 
 The normal path is username/password login and a signed `session_token`. Legacy token support is disabled unless explicitly enabled.
 
-Four-digit numeric PINs use the existing workbook format: `sha256$salt$digest`. The server never returns `credential_hash`.
+Users sign in with only a unique four-digit numeric PIN. PINs use the existing workbook format: `sha256$salt$digest`, and the server never returns `credential_hash`.
 
 ### Roles
 
@@ -234,7 +234,7 @@ Returns website metrics both as a list and keyed object, plus the current invent
 
 ### `sjLogin(payload)` / action `login`
 
-Accepts `user_id`/`username` and `password`. Verifies the existing salted SHA-256 hash, updates last-login time, and returns a signed six-hour session plus the public user record.
+Accepts a four-digit PIN in `password`, identifies the one active matching user, updates last-login time, and returns a signed six-hour session plus the public user record. Legacy `user_id`/`username` remains optional during migration.
 
 ### `sjSessionInfo(payload)` / action `sessionInfo`
 

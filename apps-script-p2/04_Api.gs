@@ -128,6 +128,7 @@ function sjApiInfo() {
       legacy_write_token_enabled: sjUpper_(sjScriptProperties_().getProperty(SJ_SCRIPT_PROPERTIES.ALLOW_LEGACY_WRITE_TOKEN)) === 'TRUE'
     },
     session_authentication: true,
+    pin_only_login: true,
     shopify_party_id: SJ_CONFIG.SHOPIFY_PARTY_ID
   };
 }
