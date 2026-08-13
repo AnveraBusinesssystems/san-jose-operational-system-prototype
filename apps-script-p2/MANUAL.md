@@ -91,7 +91,7 @@ Never delete or edit a saved inventory movement. Correct inventory by posting an
 
 The normal path is username/password login and a signed `session_token`. Legacy token support is disabled unless explicitly enabled.
 
-Passwords use the existing workbook format: `sha256$salt$digest`. The server never returns `credential_hash`.
+Four-digit numeric PINs use the existing workbook format: `sha256$salt$digest`. The server never returns `credential_hash`.
 
 ### Roles
 
@@ -242,7 +242,7 @@ Verifies `session_token` and returns the current public user plus write-switch s
 
 ### `sjCreateUser(payload)` / action `createUser`
 
-ADMIN only. Requires `user_id`, `full_name`, `role`, and password of at least eight characters. Hashes the password and appends the user.
+ADMIN only. Requires `user_id`, `full_name`, `role`, and a PIN containing exactly four numbers. Hashes the PIN and appends the user.
 
 ### `sjSetUserStatus(payload)` / action `setUserStatus`
 

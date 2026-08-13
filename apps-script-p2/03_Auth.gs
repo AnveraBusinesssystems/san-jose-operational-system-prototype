@@ -104,14 +104,14 @@ function sjVerifyCredential_(password, storedHash) {
   var value = sjString_(password);
   var stored = sjString_(storedHash);
   var parts = stored.split('$');
-  if (!value || parts.length !== 3 || parts[0] !== 'sha256') return false;
+  if (!/^\d{4}$/.test(value) || parts.length !== 3 || parts[0] !== 'sha256') return false;
   var actual = sjHex_(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, parts[1] + value));
   return sjConstantTimeEquals_(actual, parts[2]);
 }
 
 function sjCreateCredentialHash_(password) {
   var value = sjRequired_(password, 'password');
-  if (value.length < 8) throw new Error('Password must contain at least 8 characters.');
+  if (!/^\d{4}$/.test(value)) throw new Error('PIN must contain exactly 4 numbers.');
   var salt = Utilities.getUuid().replace(/-/g, '').slice(0, 24);
   var digest = sjHex_(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, salt + value));
   return 'sha256$' + salt + '$' + digest;
