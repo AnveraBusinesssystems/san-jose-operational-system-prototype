@@ -87,6 +87,63 @@ function sjOperationalProductRows_() {
   });
 }
 
+/** Printable price-list inputs sourced from the formula tabs only. */
+function sjPriceListAnalytics_() {
+  var priceSheet = sjSheet_('PRICE_LIST');
+  var costSheet = sjSheet_('PRODUCT_COSTS');
+  var salesSheet = sjSheet_('SALES_METRICS');
+  var settings = priceSheet.getRange(2, 1, 3, 9).getValues();
+  var priceRows = sjReadDisplayTable_('PRICE_LIST', 'Category');
+  var costLastRow = Math.max(5, Math.min(costSheet.getLastRow(), 300));
+  var costValues = costSheet.getRange(5, 2, costLastRow - 4, 8).getValues(); // B:I
+  var salesLastRow = Math.max(3, Math.min(salesSheet.getLastRow(), 200));
+  var salesValues = salesSheet.getRange(3, 21, salesLastRow - 2, 6).getValues(); // U:Z
+  var costsByName = {};
+  var salesByName = {};
+
+  costValues.forEach(function (row) {
+    var name = sjString_(row[0]);
+    if (!name) return;
+    costsByName[name] = {
+      latest_cost_per_lb: row[4] === '' || row[4] === null ? null : sjNumber_(row[4]),
+      historical_cost_per_lb: row[5] === '' || row[5] === null ? null : sjNumber_(row[5]),
+      recency_cost_per_lb: row[7] === '' || row[7] === null ? null : sjNumber_(row[7])
+    };
+  });
+  salesValues.forEach(function (row) {
+    var name = sjString_(row[0]);
+    if (!name) return;
+    salesByName[name] = {
+      weighted_sale_per_lb: row[2] === '' || row[2] === null ? null : sjNumber_(row[2]),
+      recent_sale_per_lb: row[4] === '' || row[4] === null ? null : sjNumber_(row[4])
+    };
+  });
+
+  var rows = priceRows.map(function (row) {
+    var name = sjString_(row.Product);
+    var costs = costsByName[name] || {};
+    var sales = salesByName[name] || {};
+    return {
+      category: sjString_(row.Category), product_name: name, weight_lb: sjNumber_(row['Weight (Lb)']),
+      latest_cost_per_lb: costs.latest_cost_per_lb, historical_cost_per_lb: costs.historical_cost_per_lb,
+      recency_cost_per_lb: costs.recency_cost_per_lb, weighted_sale_per_lb: sales.weighted_sale_per_lb,
+      recent_sale_per_lb: sales.recent_sale_per_lb
+    };
+  }).filter(function (row) {
+    return row.product_name && (row.latest_cost_per_lb > 0 || row.historical_cost_per_lb > 0 || row.recency_cost_per_lb > 0);
+  });
+
+  return {
+    settings: {
+      target_margin: sjNumber_(settings[0][1]) || 0.15,
+      cost_basis: sjString_(settings[0][4]) || 'Historical Weighted Cost',
+      comparison: sjString_(settings[0][8]) || 'Higher of VW & Recent',
+      average_set_margin: sjNumber_(settings[2][1]), average_result_margin: sjNumber_(settings[2][4])
+    },
+    rows: rows
+  };
+}
+
 function sjAnalyticsTotals_(rows) {
   var totals = {products: rows.length, base_qty_sold: 0, sales: 0, sales_with_cost: 0, gross_profit: 0, products_with_cost: 0, products_missing_cost: 0};
   rows.forEach(function (row) {
@@ -112,6 +169,7 @@ function sjGetOwnerAnalytics_(metrics, byKey) {
     },
     website_metrics: {rows: metrics, by_key: byKey},
     channels: {wholesale: {totals: sjAnalyticsTotals_(wholesale), products: wholesale}, shopify: {totals: sjAnalyticsTotals_(shopify), products: shopify}},
+    price_list: sjPriceListAnalytics_(),
     operations: {
       products: operations,
       summary: {
