@@ -39,6 +39,11 @@ test('all live workbook tables are declared with exact headers', () => {
   }
 });
 
+test('daily metrics use date and product as a composite unique key', () => {
+  assert.match(read('00_Config.gs'), /DAILY_PRODUCT_METRICS:[\s\S]*unique: Object\.freeze\(\['metric_date', 'product_id'\]\)/);
+  assert.match(read('02_DataAccess.gs'), /table\.definition\.unique \|\| \[table\.definition\.id\]/);
+});
+
 test('GET is read-only and mutations require POST routing', () => {
   const api = read('04_Api.gs');
   assert.match(api, /SJ_READ_ACTIONS/);

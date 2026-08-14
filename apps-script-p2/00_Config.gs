@@ -69,6 +69,7 @@ var SJ_SHEETS = Object.freeze({
   }),
   DAILY_PRODUCT_METRICS: Object.freeze({
     id: 'metric_date',
+    unique: Object.freeze(['metric_date', 'product_id']),
     headers: ['metric_date', 'product_id', 'opening_qty', 'received_qty', 'sold_qty', 'amazon_consumed_qty', 'returned_qty', 'waste_qty', 'closing_qty', 'purchase_cost', 'sales_revenue', 'cogs', 'gross_profit', 'closing_inventory_value', 'through_movement_sequence', 'calculated_at']
   }),
   AUDIT_LOG: Object.freeze({

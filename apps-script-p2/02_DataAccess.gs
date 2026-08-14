@@ -117,14 +117,15 @@ function sjSchemaHealth_() {
   Object.keys(SJ_SHEETS).forEach(function (name) {
     try {
       var table = sjTable_(name);
-      var id = table.definition.id;
+      var uniqueColumns = table.definition.unique || [table.definition.id];
       var seen = {};
       var duplicateIds = [];
       table.records.forEach(function (record) {
-        var value = sjString_(record[id]);
-        if (!value) return;
-        if (seen[value]) duplicateIds.push(value);
-        seen[value] = true;
+        var values = uniqueColumns.map(function (column) { return sjString_(record[column]); });
+        if (values.some(function (value) { return !value; })) return;
+        var key = values.join('|');
+        if (seen[key]) duplicateIds.push(key);
+        seen[key] = true;
       });
       tables[name] = {
         ok: duplicateIds.length === 0,
