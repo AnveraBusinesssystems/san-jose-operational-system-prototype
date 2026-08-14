@@ -1,5 +1,5 @@
 import { warmOperationalCache } from "./api-smooth1.js?v=data-audit1";
-import { getSession, signIn, signOut } from "./auth.js?v=rack-inventory1";
+import { getSession, signIn, signOut, touchSession } from "./auth.js?v=idle-timeout1";
 import { renderNavigation, renderRoute, configureRouter, navigate } from "./router.js?v=rack-inventory1";
 import { allowedPages } from "./permissions.js?v=warehouse-v2";
 import { enableTableFilters, enableTableSorting } from "./utils.js?v=readiness2";
@@ -30,7 +30,8 @@ const loginButton = pinForm?.querySelector('button[type="submit"]');
 let user = getSession();
 let renderToken = 0;
 let inactivityTimer;
-const INACTIVITY_LIMIT_MS = 30 * 60 * 1000;
+let lastActivityWrite = 0;
+const INACTIVITY_LIMIT_MS = 5 * 60 * 1000;
 
 const routes = {
   mobileHome,
@@ -214,8 +215,16 @@ function showApp() {
 function resetInactivityTimer() {
   window.clearTimeout(inactivityTimer);
   if (!user) return;
+  const now = Date.now();
+  if (now - lastActivityWrite >= 1000) {
+    if (!touchSession()) {
+      performSignOut("Signed out after 5 minutes of inactivity.");
+      return;
+    }
+    lastActivityWrite = now;
+  }
   inactivityTimer = window.setTimeout(
-    () => performSignOut("Signed out after 30 minutes of inactivity."),
+    () => performSignOut("Signed out after 5 minutes of inactivity."),
     INACTIVITY_LIMIT_MS
   );
 }
@@ -290,7 +299,7 @@ document.getElementById("signOutButton")?.addEventListener("click", () => {
   performSignOut();
 });
 
-["pointerdown", "keydown", "touchstart"].forEach((eventName) => {
+["pointerdown", "keydown", "touchstart", "scroll"].forEach((eventName) => {
   document.addEventListener(eventName, resetInactivityTimer, { passive: true });
 });
 

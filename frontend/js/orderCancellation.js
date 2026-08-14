@@ -9,7 +9,7 @@ let observer;
 
 function currentUser() {
   try {
-    return JSON.parse(localStorage.getItem("sjops.session") || "null");
+    return JSON.parse(sessionStorage.getItem("sjops.session") || "null");
   } catch (_error) {
     return null;
   }
