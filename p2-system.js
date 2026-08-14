@@ -1,6 +1,8 @@
 (() => {
   const API=String(window.SAN_JOSE_P2_API_URL||'').trim();
   const SESSION_KEY='sj_operations_session_v1';
+  const IDLE_TIMEOUT_MS=5*60*1000;
+  const SESSION_ACTIVITY_EVENTS=['pointerdown','touchstart','keydown','scroll'];
   const esc=value=>String(value??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt',"'":'&#39;','"':'&quot;'}[c]));
   const num=value=>Number.isFinite(Number(value))?Number(value):0;
   const money=value=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(num(value));
@@ -8,10 +10,24 @@
   const truth=value=>value===true||String(value).toUpperCase()==='TRUE'||value===1;
   const freshOrderState=()=>({query:'',status:'ALL',payment:'ALL',from:'',to:'',page:1,pageSize:50});
   const app={session:null,apiInfo:null,cache:{},loading:new Set(),errors:{},queries:{},scanner:null,orders:{PURCHASE:freshOrderState(),SALE:freshOrderState()},analytics:{tab:'executive',rank:'sales',channel:'all',pricing:{ready:false,margin:.15,costBasis:'historical',priceBasis:'higher',query:'',weights:{},margins:{}}}};
+  let idleTimer=0,lastActivityWrite=0;
 
-  function savedSession(){try{return JSON.parse(sessionStorage.getItem(SESSION_KEY)||'null')}catch(_e){return null}}
+  const WAREHOUSE_PAGES=new Set(['overview','receiving','shipping','inventory','packing','scanner']);
+  const WAREHOUSE_PERMISSIONS=new Set(['inventory.move','inventory.receive','inventory.count','tasks.write','reports.read']);
+  function role(){return String(app.session?.user?.role||'').toUpperCase()}
+  function hasPermission(permission){return role()==='ADMIN'||(role()==='WAREHOUSE'&&WAREHOUSE_PERMISSIONS.has(permission))}
+  function canAccessPage(page){return role()==='ADMIN'||(role()==='WAREHOUSE'&&WAREHOUSE_PAGES.has(page))}
+  function canWrite(permission){return Boolean(app.session)&&app.apiInfo?.writes_enabled===true&&hasPermission(permission)}
+
+  function clearStoredSession(){try{sessionStorage.removeItem(SESSION_KEY)}catch(_e){}}
+  function savedSession(){try{const value=JSON.parse(sessionStorage.getItem(SESSION_KEY)||'null'),last=Number(value?.last_activity_at||0);if(!value?.session_token||!last||Date.now()-last>=IDLE_TIMEOUT_MS){clearStoredSession();return null}return value}catch(_e){return null}}
   function setAuthScreen(signedIn){const login=document.getElementById('p2LoginScreen'),workspace=document.getElementById('p2App');if(login)login.hidden=signedIn;if(workspace)workspace.hidden=!signedIn;document.body.classList.toggle('p2-login-mode',!signedIn);if(!signedIn)setTimeout(()=>document.querySelector('#p2LoginForm [name="password"]')?.focus(),0)}
-  function saveSession(value){app.session=value;try{value?sessionStorage.setItem(SESSION_KEY,JSON.stringify(value)):sessionStorage.removeItem(SESSION_KEY)}catch(_e){}updateSessionUi();setAuthScreen(Boolean(value))}
+  function scheduleIdleTimeout(){clearTimeout(idleTimer);if(!app.session)return;const remaining=Math.max(0,IDLE_TIMEOUT_MS-(Date.now()-Number(app.session.last_activity_at||0)));idleTimer=setTimeout(()=>expireSession(),remaining)}
+  function persistSession(){try{app.session?sessionStorage.setItem(SESSION_KEY,JSON.stringify(app.session)):clearStoredSession()}catch(_e){}}
+  function saveSession(value,{touch=true}={}){app.session=value;if(value&&touch)value.last_activity_at=Date.now();persistSession();scheduleIdleTimeout();updateSessionUi();setAuthScreen(Boolean(value));if(typeof renderNav==='function')renderNav()}
+  function expireSession(){if(!app.session)return;app.cache={};closeDrawer();saveSession(null);const status=document.getElementById('p2LoginError');if(status)status.textContent='Signed out after 5 minutes without activity.'}
+  function recordActivity(){if(!app.session)return;const now=Date.now();if(now-lastActivityWrite<1000)return;lastActivityWrite=now;app.session.last_activity_at=now;persistSession();scheduleIdleTimeout()}
+  function isAuthenticationError(error){return /session (?:is )?invalid|session expired|valid session_token|required|sign in again|active user not found|user role changed/i.test(String(error?.message||error||''))}
   function token(){return app.session?.session_token||''}
   function operationId(prefix='WEB'){return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2,9)}`}
   function read(action,payload={}){
@@ -40,7 +56,7 @@
   function connected(label='LIVE'){return `<span class="status green"><span class="live-state-dot"></span>${esc(label)}</span>`}
   function loading(label){return `<div class="live-loading"><strong>Loading ${esc(label)}</strong>Reading the live operational database…</div>`}
   function failure(key){return `<div class="live-error"><strong>Connection error:</strong> ${esc(app.errors[key]||'Unknown error')} <button class="live-table-action" data-live-retry="${esc(key)}">Retry</button></div>`}
-  function writeGate(){if(!app.session)return `<div class="live-write-lock">Sign in before creating or editing records. <button class="live-table-action" data-live-login>Sign in</button></div>`;if(app.apiInfo?.writes_enabled!==true)return `<div class="live-write-lock">Signed in as ${esc(app.session.user?.full_name||app.session.user?.user_id)}. Live writes are still disabled by the backend safety switch.</div>`;return ''}
+  function writeGate(permission=''){if(!app.session)return `<div class="live-write-lock">Sign in before creating or editing records. <button class="live-table-action" data-live-login>Sign in</button></div>`;if(permission&&!hasPermission(permission))return `<div class="live-write-lock">Your ${esc(role())} account can view this record, but cannot change it.</div>`;if(app.apiInfo?.writes_enabled!==true)return `<div class="live-write-lock">Signed in as ${esc(app.session.user?.full_name||app.session.user?.user_id)}. Live writes are still disabled by the backend safety switch.</div>`;return ''}
   function pageLoad(key,action,payload={}){if(app.cache[key]!==undefined||app.loading.has(key))return;app.loading.add(key);delete app.errors[key];read(action,payload).then(result=>app.cache[key]=result).catch(error=>app.errors[key]=error.message).finally(()=>{app.loading.delete(key);if(document.getElementById('pageView'))renderPage()})}
   async function loadAllOrders(key,type){
     if(app.cache[key]!==undefined||app.loading.has(key))return;
@@ -74,7 +90,7 @@
     finally{clearTimeout(slowNotice)}
   }
   function openSession(){const user=app.session.user||{};openDrawer('ACCOUNT',user.full_name||user.user_id,`<div class="live-kv"><div><span>User ID</span><strong>${esc(user.user_id)}</strong></div><div><span>Role</span><strong>${esc(user.role)}</strong></div><div><span>Session</span><strong>Active</strong></div><div><span>Writes</span><strong>${app.apiInfo?.writes_enabled?'Enabled':'Backend locked'}</strong></div></div><div class="drawer-actions"><button class="secondary-btn" data-sign-out>Sign out</button></div>`);document.querySelector('[data-sign-out]').onclick=()=>{closeDrawer();saveSession(null)}}
-  async function restoreSession(){app.session=savedSession();setAuthScreen(false);try{app.apiInfo=await read('apiInfo');if(app.session){const info=await write('sessionInfo',{});app.session.user=info.user;saveSession(app.session)}}catch(error){if(app.session){saveSession(null)}}finally{updateSessionUi();setAuthScreen(Boolean(app.session));renderPage()}}
+  async function restoreSession(){app.session=savedSession();setAuthScreen(false);try{app.apiInfo=await read('apiInfo');if(app.session){const info=await write('sessionInfo',{});app.session.user=info.user;saveSession(app.session,{touch:false})}}catch(error){if(app.session&&isAuthenticationError(error))saveSession(null)}finally{updateSessionUi();setAuthScreen(Boolean(app.session));if(app.session)scheduleIdleTimeout();renderPage()}}
 
   function dashboardMetric(byKey,key,type='number'){const metric=byKey?.[key],value=metric?.value;if(type==='money')return money(value);if(type==='percent')return `${quantity(num(value)*100)}%`;return quantity(value)}
   window.renderOverview=function(){setHeading('Overview','Operations Center');pageLoad('dashboard','getDashboard');pageLoad('tasks','listWarehouseTasks',{limit:100});pageLoad('movements','getMovementHistory',{limit:100});const d=app.cache.dashboard;if(app.errors.dashboard)return failure('dashboard');if(!d)return loading('operations dashboard');const m=d.by_key||{},tasks=rows(app.cache.tasks).filter(t=>!['COMPLETE','CANCELLED'].includes(String(t.status).toUpperCase())),moves=(Array.isArray(app.cache.movements)?app.cache.movements:rows(app.cache.movements)).filter(x=>num(x.base_quantity)>0).slice(0,12);return `<div class="page-stack"><div class="hero-row"><div class="hero-copy"><h2>Operations Center</h2><p>Warehouse, orders and financial position from the live Google Sheet.</p></div>${connected('LIVE DATABASE')}</div><section class="metric-grid">${metric('Inventory value',dashboardMetric(m,'estimated_inventory_value','money'),'Estimated current value')}${metric("This week's sales",dashboardMetric(m,'current_week_sales','money'),'Monday through today')}${metric("This week's purchases",dashboardMetric(m,'current_week_purchases','money'),'Monday through today')}${metric('Rack occupancy',dashboardMetric(m,'rack_occupancy_pct','percent'),`${dashboardMetric(m,'rack_locations_occupied')} / ${dashboardMetric(m,'rack_locations_capacity')} spaces`)}</section><section class="metric-grid">${metric('Owed to us',dashboardMetric(m,'customer_balance_due','money'),'Customer balances')}${metric('We owe',dashboardMetric(m,'vendor_balance_due','money'),'Vendor balances')}${metric('YTD sales',dashboardMetric(m,'ytd_sales','money'),'Includes Shopify')}${metric('Demand reorders',dashboardMetric(m,'reorder_products'),'DEMAND Sheet model')}</section><section class="grid-2">${panel("Today's work",`${tasks.length} active warehouse tasks`,tasks.length?taskTable(tasks.slice(0,8)):emptyState('No active tasks','Create a warehouse task from Admin.'))}${panel('Recent inventory activity','Quantity-changing movements only',moves.length?movementList(moves):emptyState('No quantity-changing movements','Audited receipts, moves and deductions will appear here.'))}</section></div>`}
@@ -179,6 +195,19 @@
   function openPackingDeduct(key){if(!app.session)return openLogin();const [productId,lotId]=String(key).split('|'),line=(app.cache.packing?.lines||[]).find(x=>x.product_id===productId&&x.lot_id===lotId);if(!line)return;openDrawer('PACKING DEDUCTION',line.product_name,`<form class="live-form" data-pack-form><div class="notice-banner">Available in PACKING: <strong>${quantity(line.current_base_qty)} ${esc(line.base_unit)}</strong></div><div class="field"><label>Quantity shipped</label><input name="quantity" type="number" min=".000001" max="${num(line.current_base_qty)}" step="any" required></div><div class="field"><label>Unit</label><select name="unit_code"><option>${esc(line.base_unit)}</option>${line.lot_unit&&line.lot_unit!==line.base_unit?`<option>${esc(line.lot_unit)}</option>`:''}</select></div><div class="field"><label>Sales order line (optional)</label><input name="order_line_id"></div><div class="field"><label>Notes</label><textarea name="notes"></textarea></div><div class="live-form-actions"><button class="secondary-btn" type="button" data-close-drawer>Cancel</button><button class="primary-btn">Deduct shipped stock</button></div><div data-form-status></div></form>`);document.querySelector('[data-pack-form]').onsubmit=async e=>{e.preventDefault();const f=e.currentTarget,s=f.querySelector('[data-form-status]');try{s.textContent='Deducting and verifying…';await write('packingDeduct',{operation_id:operationId('PACK'),product_id:productId,lot_id:lotId,quantity:num(f.quantity.value),unit_code:f.unit_code.value,order_line_id:f.order_line_id.value,notes:f.notes.value,expected_source_sequence:line.last_movement_sequence});invalidate('packing','dashboard','movements');closeDrawer();toast('Packed stock deducted.');renderPage()}catch(error){s.innerHTML=`<div class="live-error">${esc(error.message)}</div>`}}}
   function openUserCreate(){openDrawer('ADMIN','Create user',`<form class="live-form" data-user-form><div class="field"><label>User ID</label><input name="user_id" required></div><div class="field"><label>Full name</label><input name="full_name" required></div><div class="field"><label>Role</label><select name="role"><option>WAREHOUSE</option><option>ADMIN</option></select></div><div class="field"><label>Temporary 4-digit PIN</label><input name="password" type="password" inputmode="numeric" pattern="[0-9]{4}" minlength="4" maxlength="4" required></div><div class="live-form-actions"><button class="secondary-btn" type="button" data-close-drawer>Cancel</button><button class="primary-btn">Create user</button></div><div data-form-status></div></form>`);document.querySelector('[data-user-form]').onsubmit=async e=>{e.preventDefault();const f=e.currentTarget,s=f.querySelector('[data-form-status]');try{s.textContent='Creating…';await write('createUser',Object.fromEntries(new FormData(f).entries()));closeDrawer();toast('User created.')}catch(error){s.innerHTML=`<div class="live-error">${esc(error.message)}</div>`}}}
 
+  const openTaskFormBase=openTaskForm;
+  openTaskForm=async function(defaultType='COUNT'){
+    if(!app.session)return openLogin();
+    if(app.cache.products===undefined){openDrawer('WAREHOUSE TASK','Loading…',loading('products'));try{app.cache.products=await read('listProducts',{limit:500})}catch(error){document.getElementById('drawerBody').innerHTML=`<div class="live-error">${esc(error.message)}</div>`;return}}
+    return openTaskFormBase(defaultType);
+  };
+  const openReceiveBase=openReceive;
+  openReceive=async function(){
+    if(!app.session)return openLogin();
+    if(app.cache.products===undefined||app.cache.locations===undefined){openDrawer('INVENTORY RECEIPT','Loading…',loading('receiving options'));try{const [products,locations]=await Promise.all([app.cache.products===undefined?read('listProducts',{limit:500}):app.cache.products,app.cache.locations===undefined?read('listLocations',{limit:500}):app.cache.locations]);app.cache.products=products;app.cache.locations=locations}catch(error){document.getElementById('drawerBody').innerHTML=`<div class="live-error">${esc(error.message)}</div>`;return}}
+    return openReceiveBase();
+  };
+
   function bindDynamic(){
     document.querySelectorAll('[data-live-login]').forEach(b=>b.onclick=openLogin);document.querySelectorAll('[data-live-session]').forEach(b=>b.onclick=()=>app.session?openSession():openLogin());
     document.querySelectorAll('[data-live-retry]').forEach(b=>b.onclick=()=>{invalidate(b.dataset.liveRetry);renderPage()});document.querySelectorAll('[data-order-id]').forEach(b=>b.onclick=()=>openOrder(b.dataset.orderId));
@@ -197,6 +226,7 @@
   window.openCreate=function(type){if(!app.session)return openLogin();if(app.apiInfo?.writes_enabled!==true){toast('Live edits are locked by the backend safety switch.');return}if(type==='product')return openProductForm('');if(type==='party')return openPartyForm('');if(type==='purchase'||type==='sales')return openOrderCreate(type==='purchase'?'PURCHASE':'SALE');openDrawer('CREATE NEW','Choose record type',`<div class="quick-create-grid"><button class="quick-tile" data-product-create><strong>Product</strong><span>Catalog and units</span></button><button class="quick-tile" data-party-create><strong>Customer / vendor</strong><span>Business directory</span></button><button class="quick-tile" data-create-order="PURCHASE"><strong>Purchase order</strong><span>Vendor order</span></button><button class="quick-tile" data-create-order="SALE"><strong>Sales order</strong><span>Customer order</span></button><button class="quick-tile" data-task-create="COUNT"><strong>Warehouse task</strong><span>Receive, pick, count or move</span></button></div>`);bindDynamic()};
   const quick=document.getElementById('quickCreate');if(quick){const replacement=quick.cloneNode(true);quick.replaceWith(replacement);replacement.onclick=()=>window.openCreate('menu')}
   document.getElementById('p2LoginForm')?.addEventListener('submit',submitLogin);
-  window.SanJoseSystem={read,write,getSessionToken:token,getSession:()=>app.session,openLogin,invalidate};
+  SESSION_ACTIVITY_EVENTS.forEach(eventName=>window.addEventListener(eventName,recordActivity,{passive:true}));
+  window.SanJoseSystem={read,write,getSessionToken:token,getSession:()=>app.session,openLogin,invalidate,canAccessPage,hasPermission,getIdleTimeoutMs:()=>IDLE_TIMEOUT_MS};
   restoreSession();
 })();

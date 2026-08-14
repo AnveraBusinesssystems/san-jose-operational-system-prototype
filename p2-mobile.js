@@ -43,11 +43,12 @@
     }
   }
   function currentPage(){return window.state?.page||location.hash.replace('#','')||'overview';}
+  function allowed(page){return window.SanJoseSystem?.canAccessPage?.(page)!==false;}
   function render(){
     if(!isMobile())return;ensureShell();const page=currentPage(),nav=document.getElementById('mobileBottomNav');
-    nav.innerHTML=tabs.map(t=>`<button class="mobile-nav-btn ${t.page===page?'active':''}" type="button" data-mobile-page="${t.page}">${icon(t.icon)}<span>${t.label}</span></button>`).join('');
+    nav.innerHTML=tabs.filter(t=>t.page==='more'||allowed(t.page)).map(t=>`<button class="mobile-nav-btn ${t.page===page?'active':''}" type="button" data-mobile-page="${t.page}">${icon(t.icon)}<span>${t.label}</span></button>`).join('');
     nav.querySelectorAll('[data-mobile-page]').forEach(btn=>btn.addEventListener('click',()=>{const pageId=btn.dataset.mobilePage;if(pageId==='more'){openMore();return;}if(typeof window.navigate==='function')window.navigate(pageId);else location.hash=pageId;closeMore();setTimeout(render,0);}));
-    const grid=document.getElementById('mobileMoreGrid');if(grid){grid.innerHTML=moreItems.map(([id,ic,label])=>`<button type="button" class="mobile-more-item ${id===page?'active':''}" data-mobile-more-page="${id}">${icon(ic)}<span>${label}</span></button>`).join('');grid.querySelectorAll('[data-mobile-more-page]').forEach(btn=>btn.addEventListener('click',()=>{const id=btn.dataset.mobileMorePage;closeMore();if(typeof window.navigate==='function')window.navigate(id);else location.hash=id;setTimeout(render,0);}));}
+    const grid=document.getElementById('mobileMoreGrid');if(grid){grid.innerHTML=moreItems.filter(([id])=>allowed(id)).map(([id,ic,label])=>`<button type="button" class="mobile-more-item ${id===page?'active':''}" data-mobile-more-page="${id}">${icon(ic)}<span>${label}</span></button>`).join('');grid.querySelectorAll('[data-mobile-more-page]').forEach(btn=>btn.addEventListener('click',()=>{const id=btn.dataset.mobileMorePage;closeMore();if(typeof window.navigate==='function')window.navigate(id);else location.hash=id;setTimeout(render,0);}));}
   }
   function openMore(){ensureShell();const sheet=document.getElementById('mobileMoreSheet');sheet.hidden=false;document.body.classList.add('mobile-menu-open');render();}
   function closeMore(){const sheet=document.getElementById('mobileMoreSheet');if(sheet)sheet.hidden=true;document.body.classList.remove('mobile-menu-open');}

@@ -6,13 +6,15 @@ const root = path.resolve(__dirname, '..');
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const system = fs.readFileSync(path.join(root, 'p2-system.js'), 'utf8');
 const inventory = fs.readFileSync(path.join(root, 'p2-live-inventory.js'), 'utf8');
+const mobile = fs.readFileSync(path.join(root, 'p2-mobile.js'), 'utf8');
 const config = fs.readFileSync(path.join(root, 'p2-config.js'), 'utf8');
 const ownerAnalyticsCss = fs.readFileSync(path.join(root, 'p2-owner-analytics.css'), 'utf8');
 
 assert.match(html, /p2-system\.css\?v=5/);
-assert.match(html, /p2-system\.js\?v=11/);
-assert.match(html, /p2\.js\?v=4/);
+assert.match(html, /p2-system\.js\?v=12/);
+assert.match(html, /p2\.js\?v=5/);
 assert.match(html, /p2-live-inventory\.js\?v=10/);
+assert.match(html, /p2-mobile\.js\?v=2/);
 assert.match(html, /p2-owner-analytics\.css\?v=4/);
 assert.match(html, /p2-config\.js\?v=11/);
 assert.match(config, /AKfycbwV-78yi9qOG-59HsDXye0Fy-6i47DNem2qQu5gBjygb7t6CGnKoqYATI6NrkXijqE0jw/);
@@ -43,6 +45,14 @@ for (const page of [
 
 assert.match(system, /session_token/);
 assert.match(system, /setAuthScreen/);
+assert.match(system, /IDLE_TIMEOUT_MS=5\*60\*1000/);
+assert.match(system, /sessionStorage\.setItem\(SESSION_KEY/);
+assert.match(system, /Signed out after 5 minutes without activity/);
+assert.match(system, /SESSION_ACTIVITY_EVENTS/);
+assert.match(system, /isAuthenticationError/);
+assert.match(system, /canAccessPage/);
+assert.match(system, /WAREHOUSE_PAGES/);
+assert.match(mobile, /SanJoseSystem\?\.canAccessPage/);
 assert.match(inventory, /SanJoseSystem\?\.getSessionToken/);
 assert.match(inventory, /openMoveEditor/);
 assert.match(inventory, /'moveInventory'/);
