@@ -88,16 +88,15 @@ Moving to/from `PACKING` creates `PACKING_IN`/`PACKING_OUT` history without chan
 ## Roles and permissions
 
 - `ADMIN`: full administration and inventory adjustment, plus all warehouse workflows.
-- `MANAGER`: warehouse operations, Sales Order actions/sending, receiving, and manager-only Packing Usage.
-- `OPERATOR`: receiving, physical transfers, scanning, and sending confirmed orders. Operators cannot post destructive Packing Usage.
+- `WAREHOUSE`: receiving, shipping, inventory movement and counting, packing, scanning, task updates, and operational reports.
 
 The frontend hides inappropriate actions for usability. Apps Script repeats the relevant permission checks before writes.
 
 ## API routing and endpoint
 
-There is one top-level router: `handleApiRequest_()` in `apps-script/Code.gs`. It exposes the V2 project through the single `warehouseV2Api` route; `apps-script/WarehouseApiV2.gs` dispatches supported V2 operations. This avoids duplicate global Apps Script router functions.
+There is one backend and one router: `doGet()` / `doPost()` in `apps-script-p2/04_Api.gs`. The complete Apps Script project is the numbered modular source in `apps-script-p2/`; the removed monolithic `Code.gs` and legacy `apps-script/` backend must not be copied into the project.
 
-The frontend endpoint is configured in `frontend/js/config.js`. The checked-in value is the intended Apps Script `/exec` deployment URL. Do not replace it with an older URL without verifying the live deployment.
+The frontend endpoint is configured in `p2-config.js`. The checked-in value is the intended Apps Script `/exec` deployment URL. Do not replace it without verifying the live deployment.
 
 All inventory-changing frontend requests generate an `operation_id` (for example `RCVPLACE-…`, `SENDBATCH-…`, `PACKIN-…`, or `PACKUSE-…`). Apps Script checks persisted operation IDs, under a lock, before changing inventory. A retry or double tap must not apply the movement twice.
 
@@ -105,19 +104,20 @@ All inventory-changing frontend requests generate an `operation_id` (for example
 
 ### Frontend (automatic)
 
-Pushes to `codex/professional-ui-refresh` are the source for the existing GitHub Pages deployment. The Warehouse V2 workflow also runs `.github/workflows/warehouse-v2-check.yml` for frontend syntax, the combined Apps Script global namespace, route contracts, and mobile entry points.
+The P2 workflow runs `.github/workflows/p2-check.yml` for frontend syntax, the combined Apps Script global namespace, backend contracts, and inventory regressions.
 
 ### Apps Script (manual)
 
 Apps Script source does **not** auto-deploy with GitHub Pages. There is currently no checked-in `.clasp.json` or Apps Script deployment workflow. After backend changes:
 
 1. Open the Apps Script project attached to the operational Sheet.
-2. Copy every checked-in `apps-script/*.gs` file into the project, preserving one file per source file. Apps Script shares one global namespace; do not paste a second `handleApiRequest_`.
-3. Save and run `validateOperationalSchema` from the editor. Authorize access if prompted and resolve any reported missing headers/sheets without deleting history.
-4. Run a syntax check/save in the editor, then choose **Deploy → Manage deployments**.
-5. Edit the active Web app deployment, select **New version**, keep the existing execution/access settings, and deploy.
-6. Confirm the resulting `/exec` URL matches `GOOGLE_SCRIPT_WEB_APP_URL` in `frontend/js/config.js`. If Google issues a new URL, update the frontend config deliberately and redeploy Pages.
-7. Open the `/exec` URL directly and confirm it reports the current backend version, then perform the verification checklist below.
+2. Delete obsolete source files from the Apps Script editor, including any monolithic `Code.gs` or legacy Warehouse V2 modules.
+3. Copy every checked-in `apps-script-p2/*.gs` file into the project, preserving one editor file per source file. Do not combine these modules with an older router or authentication implementation.
+4. Save and run `validateOperationalBackend` from the editor. Authorize access if prompted and resolve any reported missing headers/sheets without deleting history.
+5. Run a syntax check/save in the editor, then choose **Deploy → Manage deployments**.
+6. Edit the active Web app deployment, select **New version**, keep the existing execution/access settings, and deploy.
+7. Confirm the resulting `/exec` URL matches `SAN_JOSE_P2_API_URL` in `p2-config.js`. If Google issues a new URL, update the frontend config deliberately and redeploy Pages.
+8. Open the `/exec?action=apiInfo` URL directly and confirm `pin_only_login` is `true`, then perform the verification checklist below.
 
 The canonical backend is the checked-in `.gs` source; a GitHub commit alone does not update the live Apps Script deployment.
 

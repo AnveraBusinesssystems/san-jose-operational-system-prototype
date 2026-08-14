@@ -1,0 +1,54 @@
+name: P2 operational system checks
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  syntax-and-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Check frontend syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          for file in p2.js p2-sort.js p2-live-inventory.js p2-mobile.js p2-overview.js p2-system.js; do
+            node --check "$file"
+          done
+
+      - name: Check Apps Script as one global project
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat apps-script-p2/*.gs > /tmp/san-jose-apps-script.js
+          node --check /tmp/san-jose-apps-script.js
+
+      - name: Run P2 integration and regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          for test_file in tests/*.test.cjs; do
+            node "$test_file"
+          done
+
+      - name: Verify single backend contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -d apps-script
+          test ! -f apps-script-p2/Code.gs
+          test "$(grep -R -l '^function doGet' apps-script-p2/*.gs | wc -l | tr -d ' ')" = "1"
+          test "$(grep -R -l '^function doPost' apps-script-p2/*.gs | wc -l | tr -d ' ')" = "1"
+          grep -q 'pin_only_login: true' apps-script-p2/04_Api.gs
+          grep -q "PIN must contain exactly 4 numbers" apps-script-p2/03_Auth.gs
