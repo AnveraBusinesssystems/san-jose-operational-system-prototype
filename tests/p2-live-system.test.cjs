@@ -5,6 +5,7 @@ const path = require('node:path');
 const root = path.resolve(__dirname, '..');
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const system = fs.readFileSync(path.join(root, 'p2-system.js'), 'utf8');
+const systemCss = fs.readFileSync(path.join(root, 'p2-system.css'), 'utf8');
 const shell = fs.readFileSync(path.join(root, 'p2.js'), 'utf8');
 const inventory = fs.readFileSync(path.join(root, 'p2-live-inventory.js'), 'utf8');
 const mobile = fs.readFileSync(path.join(root, 'p2-mobile.js'), 'utf8');
@@ -16,8 +17,8 @@ const legacyAuth = fs.readFileSync(path.join(root, 'frontend/js/auth.js'), 'utf8
 const orderCancellation = fs.readFileSync(path.join(root, 'frontend/js/orderCancellation.js'), 'utf8');
 const purchaseOrderBootstrap = fs.readFileSync(path.join(root, 'frontend/js/purchaseOrderEditingBootstrap.js'), 'utf8');
 
-assert.match(html, /p2-system\.css\?v=5/);
-assert.match(html, /p2-system\.js\?v=14/);
+assert.match(html, /p2-system\.css\?v=6/);
+assert.match(html, /p2-system\.js\?v=15/);
 assert.match(html, /p2\.js\?v=6/);
 assert.match(html, /p2-live-inventory\.js\?v=11/);
 assert.match(html, /p2-mobile\.js\?v=2/);
@@ -111,4 +112,8 @@ assert.match(system, />View<\/button>/);
 assert.match(system, /scan\.elements\.namedItem\('query'\)/);
 assert.match(html, /pattern="\[0-9\]\{4\}"/);
 assert.match(system, /Enter your 4-digit PIN/);
+assert.match(system, /data-user-status-form/);
+assert.match(system, /write\('setUserStatus'/);
+assert.match(system, /Changing a user’s name, role, PIN, or User ID requires a future backend update/);
+assert.match(systemCss, /\.admin-settings/);
 console.log('P2 live system integration checks passed.');
