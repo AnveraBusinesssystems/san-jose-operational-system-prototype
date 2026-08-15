@@ -5,6 +5,7 @@ const path = require('node:path');
 const root = path.resolve(__dirname, '..');
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const system = fs.readFileSync(path.join(root, 'p2-system.js'), 'utf8');
+const shell = fs.readFileSync(path.join(root, 'p2.js'), 'utf8');
 const inventory = fs.readFileSync(path.join(root, 'p2-live-inventory.js'), 'utf8');
 const mobile = fs.readFileSync(path.join(root, 'p2-mobile.js'), 'utf8');
 const config = fs.readFileSync(path.join(root, 'p2-config.js'), 'utf8');
@@ -16,8 +17,8 @@ const orderCancellation = fs.readFileSync(path.join(root, 'frontend/js/orderCanc
 const purchaseOrderBootstrap = fs.readFileSync(path.join(root, 'frontend/js/purchaseOrderEditingBootstrap.js'), 'utf8');
 
 assert.match(html, /p2-system\.css\?v=5/);
-assert.match(html, /p2-system\.js\?v=12/);
-assert.match(html, /p2\.js\?v=5/);
+assert.match(html, /p2-system\.js\?v=14/);
+assert.match(html, /p2\.js\?v=6/);
 assert.match(html, /p2-live-inventory\.js\?v=10/);
 assert.match(html, /p2-mobile\.js\?v=2/);
 assert.match(html, /p2-owner-analytics\.css\?v=4/);
@@ -66,6 +67,12 @@ assert.match(purchaseOrderBootstrap, /sessionStorage\.getItem\("sjops\.session"\
 assert.match(legacyHtml, /app-smooth1\.js\?v=idle-timeout1/);
 assert.match(system, /canAccessPage/);
 assert.match(system, /WAREHOUSE_PAGES/);
+assert.match(system, /WAREHOUSE_PAGES=new Set\(\['receiving','shipping','inventory','packing','scanner'\]\)/);
+assert.doesNotMatch(system, /WAREHOUSE_PAGES=new Set\(\[[^\]]*'overview'/);
+assert.match(system, /finally\{updateSessionUi\(\);setAuthScreen\(Boolean\(app\.session\)\);if\(app\.session\)scheduleIdleTimeout\(\);renderNav\(\);renderPage\(\)\}/);
+assert.match(shell, /function defaultAllowedPage\(\)/);
+assert.match(shell, /if\(!canOpenPage\(state\.page\)\)\{navigate\(defaultAllowedPage\(\)\);return\}/);
+assert.doesNotMatch(shell, /canAccessPage\?\.\(page\)===false\)page='overview'/);
 assert.match(mobile, /SanJoseSystem\?\.canAccessPage/);
 assert.match(inventory, /SanJoseSystem\?\.getSessionToken/);
 assert.match(inventory, /openMoveEditor/);
